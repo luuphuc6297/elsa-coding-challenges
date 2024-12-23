@@ -42,3 +42,8 @@ export const CACHE_KEYS = {
     TOP_PLAYERS: 'top-players:',
     CURRENT_QUESTION: 'current-question:',
 }
+
+/**
+ * Redis client injection token
+ */
+export const REDIS_CLIENT = 'REDIS_CLIENT'

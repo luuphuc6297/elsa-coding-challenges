@@ -19,9 +19,12 @@ import { ResponseUtil } from 'shared/utils/response.util'
 import { Socket, Server as SocketIOServer } from 'socket.io'
 import { JoinQuizDto } from './dtos/join-quiz.dto'
 import { ParticipantReadyDto } from './dtos/participant-ready.dto'
-import { StartSessionDto } from './dtos/start-session.dto'
 import { SubmitAnswerDto } from './dtos/submit-answer.dto'
-import { IQuestionEndedEvent, ISessionCompletedEvent } from './interfaces/quiz-session.interface'
+import {
+    IQuestionEndedEventData,
+    ISessionCompletedEventData,
+} from './interfaces/quiz-session.interface'
+
 import { QuizService } from './services/quiz.service'
 
 const QUIZ_CHANNEL = 'quiz_events'
@@ -54,10 +57,13 @@ export class QuizGatewayProvider {
     }
 }
 
+/**
+ * Gateway for handling real-time quiz events
+ */
 @WebSocketGateway({
     namespace: '/quiz',
     cors: {
-        origin: 'http://localhost:3002',
+        origin: process.env.CLIENT_URL,
         credentials: true,
         methods: ['GET', 'POST', 'OPTIONS'],
         allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin'],
@@ -206,7 +212,6 @@ export class QuizGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
             const leaderboard = await this.leaderboardService.getLeaderboard(data.quizId)
 
-            // Cập nhật danh sách người chơi trong quizState
             let quizState = this.activeQuizzes.get(data.quizId)
             if (!quizState) {
                 quizState = {
@@ -254,7 +259,6 @@ export class QuizGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
                 throw new Error('Quiz session not found')
             }
 
-            // Kiểm tra xem người chơi đã trả lời câu hỏi này chưa
             const answerKey = `${data.userId}_${data.questionId}`
             if (quizState.submittedAnswers.has(answerKey)) {
                 throw new Error('Answer already submitted for this question')
@@ -268,7 +272,6 @@ export class QuizGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
                 data.timeSpent
             )
 
-            // Đánh dấu là đã trả lời
             quizState.submittedAnswers.add(answerKey)
 
             await this.redisService.publish(QUIZ_CHANNEL, {
@@ -276,17 +279,17 @@ export class QuizGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
                 quizId: data.quizId,
                 data: {
                     userId: data.userId,
-                    score: result.totalScore,
-                    isCorrect: result.isCorrect,
+                    score: 0,
+                    isCorrect: false,
                 },
             })
 
             const leaderboard = await this.leaderboardService.updateLeaderboard({
                 quizId: data.quizId,
                 userId: data.userId,
-                score: result.points,
+                score: 0,
                 timeSpent: data.timeSpent,
-                correctAnswers: result.isCorrect ? 1 : 0,
+                correctAnswers: 0,
             })
 
             await this.redisService.publish(QUIZ_CHANNEL, {
@@ -295,21 +298,16 @@ export class QuizGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
                 data: { leaderboard },
             })
 
-            // Kiểm tra nếu tất cả người chơi đã trả lời
             const allAnswered = Array.from(quizState.participants).every((participantId) =>
                 quizState.submittedAnswers.has(`${participantId}_${data.questionId}`)
             )
 
             if (allAnswered) {
-                // Kết thúc câu hỏi sớm nếu tất cả đã trả lời
                 clearTimeout(quizState.timer)
                 await this.handleEndQuestion(client, { quizId: data.quizId })
             }
 
             // Track metrics
-            if (result.isCorrect) {
-                await this.metricsService.trackCorrectAnswers(data.quizId)
-            }
             await this.metricsService.trackQuestionResponseTime(data.quizId, data.timeSpent)
             await this.metricsService.trackLatency('submit_answer', Date.now() - startTime)
 
@@ -414,14 +412,14 @@ export class QuizGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
                 correctAnswers: number
             }>
 
-            const event: IQuestionEndedEvent = {
+            const event = {
                 type: EVENTS.QUESTION_ENDED,
                 data: {
                     questionId: currentQuestion.questionId,
                     correctAnswer: currentQuestion.correctAnswer,
                     leaderboard,
-                    nextQuestionIn: 5,
-                },
+                    nextQuestionIn: 5000,
+                } as IQuestionEndedEventData,
             }
 
             await this.redisService.publish(QUIZ_CHANNEL, {
@@ -467,12 +465,12 @@ export class QuizGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
                 duration: (Date.now() - quizState.startTime) / 1000,
             }
 
-            const event: ISessionCompletedEvent = {
+            const event = {
                 type: EVENTS.SESSION_COMPLETED,
                 data: {
                     leaderboard,
                     statistics,
-                },
+                } as ISessionCompletedEventData,
             }
 
             await this.redisService.publish(QUIZ_CHANNEL, {
@@ -557,77 +555,28 @@ export class QuizGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         }
     }
 
-    @UsePipes(new WsValidationPipe())
-    @SubscribeMessage(EVENTS.START_SESSION)
-    async handleStartSession(client: Socket, payload: StartSessionDto) {
-        const startTime = Date.now()
-        try {
-            console.log('Received START_SESSION event:', {
-                clientId: client.id,
-                payload,
-                user: client['user'],
-            })
+    // @UsePipes(new WsValidationPipe())
+    // @SubscribeMessage(EVENTS.START_SESSION)
+    // async handleStartSession(
+    //     @ConnectedSocket() client: Socket,
+    //     @MessageBody() payload: StartSessionDto
+    // ) {
+    //     try {
+    //         // Join room before broadcasting
+    //         await client.join(payload.quizId)
 
-            if (!client['user']) {
-                console.log('User not authenticated')
-                throw new Error('User not authenticated')
-            }
+    //         const { session } = await this.quizService.startQuizSession(
+    //             payload.quizId,
+    //             payload.userId
+    //         )
 
-            const { session, questionsList } = await this.quizService.startQuizSession(
-                payload.quizId
-            )
-
-            // Join room trước khi broadcast
-            await client.join(payload.quizId)
-
-            // Broadcast to room
-            this.server.to(payload.quizId).emit(EVENTS.START_SESSION, {
-                sessionId: session.sessionId,
-                participants: session.participants,
-                startTime: session.startTime,
-                totalQuestions: questionsList.length,
-            })
-
-            // Log để debug
-            console.log('Emitting START_SESSION event:', {
-                roomName: payload.quizId,
-                eventType: EVENTS.START_SESSION,
-                totalQuestions: questionsList.length,
-                sessionId: session.sessionId,
-            })
-
-            // Publish to Redis
-            await this.redisService.publish(QUIZ_CHANNEL, {
-                event: EVENTS.START_SESSION,
-                quizId: payload.quizId,
-                data: {
-                    sessionId: session.sessionId,
-                    participants: session.participants,
-                    startTime: session.startTime,
-                    totalQuestions: questionsList.length,
-                },
-            })
-
-            // Initialize quiz state
-            this.activeQuizzes.set(payload.quizId, {
-                currentQuestionIndex: 0,
-                timer: null,
-                startTime: Date.now(),
-                questionStartTime: null,
-                participants: new Set(session.participants.map((p) => p.userId.toString())),
-                submittedAnswers: new Set(),
-            })
-
-            // Start first question after delay
-            setTimeout(() => this.startNextQuestion(payload.quizId), 5000)
-
-            // Track metrics
-            await this.metricsService.trackLatency('start_session', Date.now() - startTime)
-
-            return ResponseUtil.success({ session })
-        } catch (error) {
-            console.error('Error starting session:', error)
-            return ResponseUtil.error(error.message)
-        }
-    }
+    //         // Update participants list in quiz state
+    //         this.server.to(payload.quizId).emit(EVENTS.SESSION_STARTED, {
+    //             participants: session.participants,
+    //             startTime: session.startTime,
+    //         })
+    //     } catch (error) {
+    //         client.emit('error', error)
+    //     }
+    // }
 }

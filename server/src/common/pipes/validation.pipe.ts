@@ -29,11 +29,9 @@ export class WsValidationPipe implements PipeTransform {
 
         const errors = await validate(object)
         if (errors.length > 0) {
-            console.error('Validation errors:', errors)
             throw new Error('Validation failed: ' + JSON.stringify(errors))
         }
 
-        console.log('Validation passed')
         return object
     }
 

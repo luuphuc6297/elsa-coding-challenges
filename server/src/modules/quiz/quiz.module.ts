@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import { JwtModule } from '@nestjs/jwt'
 import { MongooseModule } from '@nestjs/mongoose'
 import { IoAdapter } from '@nestjs/platform-socket.io'
@@ -10,7 +11,6 @@ import { QuizSession, QuizSessionSchema } from './entities/quiz-session.entity'
 import { Quiz, QuizSchema } from './entities/quiz.entity'
 import { QuizGateway } from './quiz.gateway'
 import { QuizService } from './services/quiz.service'
-import { ConfigService } from '@nestjs/config'
 
 class RedisIoAdapter extends IoAdapter {
     private adapterConstructor: ReturnType<typeof createAdapter>
