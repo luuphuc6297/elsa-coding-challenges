@@ -1,0 +1,71 @@
+services:
+    api:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        container_name: quiz-app
+        ports:
+            - '3000:3000'
+        environment:
+            - NODE_ENV=development
+            - PORT=3000
+            - MONGODB_URI=mongodb://mongodb:27017/elsa-coding-challenges
+            - REDIS_HOST=redis
+            - REDIS_PORT=6379
+            - JWT_SECRET=your-secret-key
+        depends_on:
+            mongodb:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        command: >
+            sh -c "
+                echo 'Waiting for MongoDB to be ready...' &&
+                sleep 5 &&
+                echo 'Running database seed...' &&
+                pnpm seed &&
+                echo 'Starting application...' &&
+                pnpm start:prod
+            "
+        networks:
+            - quiz-network
+
+    mongodb:
+        image: mongo:latest
+        container_name: quiz-mongodb
+        ports:
+            - '27017:27017'
+        volumes:
+            - mongodb_data:/data/db
+        healthcheck:
+            test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            start_period: 10s
+        networks:
+            - quiz-network
+
+    redis:
+        image: redis:alpine
+        container_name: quiz-redis
+        ports:
+            - '6379:6379'
+        volumes:
+            - redis_data:/data
+        healthcheck:
+            test: ["CMD", "redis-cli", "ping"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            start_period: 10s
+        networks:
+            - quiz-network
+
+networks:
+    quiz-network:
+        driver: bridge
+
+volumes:
+    mongodb_data:
+    redis_data:
