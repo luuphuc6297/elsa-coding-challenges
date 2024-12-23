@@ -3,7 +3,7 @@
 import { useSocket } from '@/hooks/useSocket'
 import { useUser } from '@/hooks/useUser'
 import { Question, QuestionStartedEvent, SessionStartedEvent, ScoreUpdateEvent, LeaderboardEntry } from '@/types'
-import { Alert, Box, Button } from '@mui/material'
+import { Alert, Box, Button, CircularProgress } from '@mui/material'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnswerOptions } from './AnswerOptions'
 import { QuestionDisplay } from './QuestionDisplay'
@@ -55,10 +55,8 @@ export function QuizPlayer({ quizId, initialQuestionData, onComplete }: Props) {
 
     const handleTimeUp = useCallback(() => {
         if (!socket || !quizState.currentQuestion) return
-        
-        console.log('Time up for question:', quizState.currentQuestion.questionId)
 
-        // Nếu chưa submit câu trả lời, tự động submit null và nhận 0 điểm
+        // If answer not submitted, auto-submit null for 0 points
         if (!quizState.hasSubmitted) {
             socket.emit(EVENTS.SUBMIT_ANSWER, {
                 quizId,
@@ -66,17 +64,17 @@ export function QuizPlayer({ quizId, initialQuestionData, onComplete }: Props) {
                 answer: null,
                 timeSpent: quizState.currentQuestion.timeLimit,
                 userId: user?._id,
-                points: 0 // Không có điểm khi hết thời gian
+                points: 0  // Zero points when time is up
             })
 
-            updateQuizState({ 
+            updateQuizState({
                 hasSubmitted: true,
                 showNextButton: true,
-                selectedAnswer: null // Không chọn câu trả lời nào
+                selectedAnswer: null  // No answer selected
             })
         }
 
-        // Emit event để server chuyển sang câu hỏi tiếp theo
+        // Emit event to move to next question
         socket.emit(EVENTS.END_QUESTION, {
             quizId,
             questionId: quizState.currentQuestion.questionId
@@ -203,10 +201,11 @@ export function QuizPlayer({ quizId, initialQuestionData, onComplete }: Props) {
             quizId,
             questionId: quizState.currentQuestion.questionId,
             answer,
-            timeSpent: quizState.currentQuestion.timeLimit - quizState.timeRemaining
+            timeSpent: quizState.currentQuestion.timeLimit - quizState.timeRemaining,
+            questionIndex: quizState.currentQuestionIndex + 2  // +2 because currentQuestionIndex starts at 0 and we want next question
         })
 
-        updateQuizState({ 
+        updateQuizState({
             selectedAnswer: answer,
             hasSubmitted: true,
             showNextButton: true
@@ -224,13 +223,13 @@ export function QuizPlayer({ quizId, initialQuestionData, onComplete }: Props) {
     const handleNextQuestion = useCallback(() => {
         if (!socket || !quizState.currentQuestion) return
 
-        // Emit event để server chuyển sang câu hỏi tiếp theo
+        // Emit event to move to next question
         socket.emit(EVENTS.END_QUESTION, {
             quizId,
             questionId: quizState.currentQuestion.questionId
         })
 
-        // Reset state cho câu hỏi tiếp theo
+        // Reset state for next question
         updateQuizState({
             currentQuestion: null,
             timeRemaining: 0,
@@ -241,15 +240,11 @@ export function QuizPlayer({ quizId, initialQuestionData, onComplete }: Props) {
         })
     }, [socket, quizId, quizState.currentQuestion, updateQuizState])
 
-    // Hiển thị loading khi chưa có câu hỏi
+    // Show loading while waiting for question
     if (!quizState.currentQuestion) {
         return (
-            <Box sx={{ textAlign: 'center', py: 4 }}>
-                <Alert severity="info">
-                    {quizState.totalQuestions ? 
-                        `Question ${quizState.currentQuestionIndex + 1}/${quizState.totalQuestions} starting soon...` :
-                        'Waiting for quiz to start...'}
-                </Alert>
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+                <CircularProgress />
             </Box>
         )
     }

@@ -106,7 +106,7 @@ export class QuizGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
                 throw new Error('Redis clients not available')
             }
 
-            // Subscribe vào kênh quiz events
+            // Subscribe to quiz events channel
             await this.redisService.subscribe(QUIZ_CHANNEL, (message) => {
                 this.handleQuizEvent(message)
             })
@@ -554,29 +554,4 @@ export class QuizGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
             return ResponseUtil.error(error.message)
         }
     }
-
-    // @UsePipes(new WsValidationPipe())
-    // @SubscribeMessage(EVENTS.START_SESSION)
-    // async handleStartSession(
-    //     @ConnectedSocket() client: Socket,
-    //     @MessageBody() payload: StartSessionDto
-    // ) {
-    //     try {
-    //         // Join room before broadcasting
-    //         await client.join(payload.quizId)
-
-    //         const { session } = await this.quizService.startQuizSession(
-    //             payload.quizId,
-    //             payload.userId
-    //         )
-
-    //         // Update participants list in quiz state
-    //         this.server.to(payload.quizId).emit(EVENTS.SESSION_STARTED, {
-    //             participants: session.participants,
-    //             startTime: session.startTime,
-    //         })
-    //     } catch (error) {
-    //         client.emit('error', error)
-    //     }
-    // }
 }

@@ -5,7 +5,14 @@ import { Socket } from 'socket.io'
 
 @Injectable()
 export class WsValidationPipe implements PipeTransform {
-    async transform(value: any, metadata: ArgumentMetadata) {
+    /**
+     * Transforms and validates incoming data
+     * @param value - Value to transform and validate
+     * @param metadata - Metadata about the value
+     * @returns Transformed and validated value
+     * @throws Error if validation fails
+     */
+    async transform(value: unknown, metadata: ArgumentMetadata) {
         console.log('WsValidationPipe processing:', {
             value,
             type: metadata.type,

@@ -103,6 +103,69 @@ export class SeedService {
             })
             quizzes.push(await quiz.save())
         }
+
+        // Add more vocabulary
+        const basicVocab = await this.quizModel.create({
+            title: 'Basic English Vocabulary',
+            description: 'Test your knowledge of basic English words',
+            category: 'vocabulary',
+            difficulty: 'beginner',
+            timeLimit: 600,
+            questions: this.generateVocabularyQuestions('Basic English'),
+            hostId: host._id,
+            isPublic: true,
+        })
+
+        // Add business vocabulary
+        const businessVocab = await this.quizModel.create({
+            title: 'Business English',
+            description: 'Essential vocabulary for business communication',
+            category: 'business',
+            difficulty: 'intermediate',
+            timeLimit: 600,
+            questions: this.generateVocabularyQuestions('Business English'),
+            hostId: host._id,
+            isPublic: true,
+        })
+
+        // Add TOEIC vocabulary
+        const toeicVocab = await this.quizModel.create({
+            title: 'TOEIC Vocabulary',
+            description: 'Common words appearing in TOEIC tests',
+            category: 'exam',
+            difficulty: 'intermediate',
+            timeLimit: 600,
+            questions: this.generateVocabularyQuestions('TOEIC'),
+            hostId: host._id,
+            isPublic: true,
+        })
+
+        // Add IELTS vocabulary
+        const ieltsVocab = await this.quizModel.create({
+            title: 'IELTS Academic Vocabulary',
+            description: 'Essential words for IELTS Academic',
+            category: 'exam',
+            difficulty: 'advanced',
+            timeLimit: 600,
+            questions: this.generateVocabularyQuestions('IELTS'),
+            hostId: host._id,
+            isPublic: true,
+        })
+
+        // Add academic vocabulary
+        const academicVocab = await this.quizModel.create({
+            title: 'Academic English',
+            description: 'Vocabulary for academic writing and research',
+            category: 'academic',
+            difficulty: 'advanced',
+            timeLimit: 600,
+            questions: this.generateVocabularyQuestions('Academic English'),
+            hostId: host._id,
+            isPublic: true,
+        })
+
+        quizzes.push(basicVocab, businessVocab, toeicVocab, ieltsVocab, academicVocab)
+
         return quizzes
     }
 

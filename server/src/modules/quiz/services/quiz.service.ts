@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { Model, Types } from 'mongoose'
-import { CACHE_KEYS, EVENTS, QUIZ_STATUS } from 'shared/constants'
+import { CACHE_KEYS, QUIZ_STATUS } from 'shared/constants'
 import { RedisService } from 'shared/services/redis.service'
 import { v4 as uuidv4 } from 'uuid'
 import { CreateQuizDto } from '../dtos/create-quiz.dto'
@@ -36,43 +36,45 @@ export class QuizService {
         return quiz
     }
 
+    private async findActiveSession(quizId: string): Promise<QuizSession> {
+        return await this.quizSessionModel
+            .findOne({
+                quizId,
+                status: { $in: [QUIZ_STATUS.WAITING, QUIZ_STATUS.ACTIVE] },
+            })
+            .exec()
+    }
+
     async joinQuizSession(quizId: string, userId: string): Promise<QuizSession> {
-        const quiz = await this.findById(quizId)
+        const session = await this.findActiveSession(quizId)
 
-        let session = await this.quizSessionModel.findOne({
-            quizId: quiz.quizId,
-            status: QUIZ_STATUS.WAITING,
-        })
+        // If session exists, update participant status
+        if (session) {
+            const existingParticipant = session.participants.find(
+                (p) => p.userId.toString() === userId
+            )
 
-        if (!session) {
-            session = new this.quizSessionModel({
-                quizId: quiz.quizId,
-                sessionId: uuidv4(),
-                participants: [],
-                status: QUIZ_STATUS.WAITING,
-                startTime: new Date(),
-                settings: {
-                    shuffleQuestions: true,
-                    shuffleOptions: true,
-                    showResults: true,
-                },
-            })
+            // If participant doesn't exist, add new one
+            if (!existingParticipant) {
+                session.participants.push({
+                    userId: new Types.ObjectId(userId),
+                    isReady: false,
+                    score: 0,
+                    answers: [],
+                    joinedAt: new Date(),
+                    hasCompleted: false,
+                    isActive: true,
+                    readyAt: null,
+                })
+                await session.save()
+            }
+            // If participant exists, update their status
+            else {
+                existingParticipant.isReady = false
+                await session.save()
+            }
         }
 
-        if (!session.participants.find((p) => p.userId.toString() === userId)) {
-            session.participants.push({
-                userId: new Types.ObjectId(userId),
-                score: 0,
-                answers: [],
-                joinedAt: new Date(),
-                hasCompleted: false,
-                isActive: true,
-                isReady: false,
-                readyAt: null,
-            })
-        }
-
-        await session.save()
         await this.redisService.set(
             `${CACHE_KEYS.QUIZ_SESSION}${session.sessionId}`,
             JSON.stringify(session),
@@ -162,85 +164,31 @@ export class QuizService {
         return Math.round(maxPoints * (0.7 + 0.3 * timeBonus))
     }
 
-    async startQuizSession(quizId: string) {
-        console.log('Starting quiz session:', { quizId })
-
-        const quiz = await this.findById(quizId)
-        console.log('Found quiz:', {
-            quizId: quiz.quizId,
-            title: quiz.title,
-            hostId: quiz.hostId,
-            isActive: quiz.isActive,
-            startTime: quiz.startTime,
-            endTime: quiz.endTime,
-        })
-
-        let session = await this.quizSessionModel.findOne({
-            quizId: quiz.quizId,
-            status: QUIZ_STATUS.WAITING,
-        })
-
+    async startQuizSession(quizId: string, userId: string) {
+        // Validate session start conditions
+        const session = await this.findActiveSession(quizId)
         if (!session) {
-            console.log('No waiting session found, creating new session')
-            session = new this.quizSessionModel({
-                quizId: quiz.quizId,
-                sessionId: uuidv4(),
-                participants: [],
-                status: QUIZ_STATUS.WAITING,
-                startTime: new Date(),
-                settings: {
-                    shuffleQuestions: true,
-                    shuffleOptions: true,
-                    showResults: true,
-                },
-                events: [],
-            })
-            await session.save()
+            throw new NotFoundException('Quiz session not found')
         }
 
-        // Kiểm tra điều kiện start session
-        const allReady = session.participants.every((p) => p.isReady)
-        if (!allReady) {
-            console.log('Not all participants are ready:', {
-                readyCount: session.participants.filter((p) => p.isReady).length,
-                totalCount: session.participants.length,
-                notReadyParticipants: session.participants
-                    .filter((p) => !p.isReady)
-                    .map((p) => ({
-                        userId: p.userId,
-                        joinedAt: p.joinedAt,
-                    })),
-            })
-            throw new Error('Not all participants are ready')
+        // Validate user permission
+        const participant = session.participants.find((p) => p.userId.toString() === userId)
+        if (!participant) {
+            throw new Error('User is not a participant in this session')
         }
 
-        // Lấy quiz và câu hỏi
-        const questions = quiz.questions.map((q) => ({
-            questionId: q.questionId,
-            content: q.content,
-            options: q.options,
-            timeLimit: q.timeLimit,
-            points: q.points,
-        }))
+        // Get quiz and questions
+        const quiz = await this.findById(quizId)
+        if (!quiz) {
+            throw new NotFoundException('Quiz not found')
+        }
 
-        // Cập nhật trạng thái session
-        session.status = QUIZ_STATUS.ACTIVE
+        // Update session status
+        session.status = 'active'
         session.startTime = new Date()
-        session.events.push({
-            type: EVENTS.START_SESSION,
-            timestamp: new Date(),
-            data: {
-                participants: session.participants,
-                startTime: session.startTime,
-                questionsList: questions,
-            },
-        })
-
         await session.save()
-        return {
-            session,
-            questionsList: questions,
-        }
+
+        return { session }
     }
 
     async endQuizSession(quizId: string) {

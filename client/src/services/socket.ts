@@ -2,6 +2,21 @@ import { env } from '@/lib/env'
 import { EVENTS } from '@/shared/constants'
 import { io, Socket } from 'socket.io-client'
 
+interface SocketResponse<T = unknown> {
+    success: boolean
+    data?: T
+    error?: string
+}
+
+interface SessionResponse {
+    session: {
+        participants: Array<{
+            userId: string
+            isReady: boolean
+        }>
+    }
+}
+
 let socket: Socket
 
 export const initSocket = () => {
@@ -162,7 +177,11 @@ export const disconnectSocket = () => {
     }
 }
 
-export const emitEvent = (eventName: string, data: any, callback?: (response: any) => void) => {
+export const emitEvent = <T = unknown, R = unknown>(
+    eventName: string,
+    data: T,
+    callback?: (response: SocketResponse<R>) => void
+) => {
     const socket = getSocket()
     console.log('Attempting to emit event:', {
         eventName,

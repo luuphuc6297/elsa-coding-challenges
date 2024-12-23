@@ -22,7 +22,7 @@ export class MetricsService implements OnModuleInit {
     constructor(private readonly redisService: RedisService) {}
 
     async onModuleInit() {
-        // Định kỳ flush metrics vào Redis
+        // Periodically flush metrics to Redis
         setInterval(() => this.flushMetrics(), this.FLUSH_INTERVAL)
     }
 

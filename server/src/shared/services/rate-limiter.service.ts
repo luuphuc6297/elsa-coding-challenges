@@ -2,9 +2,9 @@ import { Injectable } from '@nestjs/common'
 import { RedisService } from './redis.service'
 
 interface RateLimitConfig {
-    points: number // Số lượng request tối đa
-    duration: number // Thời gian (giây)
-    blockDuration?: number // Thời gian block nếu vượt quá limit
+    points: number // Maximum number of requests allowed
+    duration: number // Time window in seconds
+    blockDuration?: number // Duration to block if limit exceeded
 }
 
 @Injectable()
