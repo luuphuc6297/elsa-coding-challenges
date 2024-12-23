@@ -177,7 +177,6 @@ export function QuizPlayer({ quizId, initialQuestionData, onComplete }: Props) {
                 hasSubmitted: false
             })
 
-            // Yêu cầu câu hỏi tiếp theo
             socket.emit(EVENTS.START_QUESTION, {
                 quizId,
                 questionIndex: quizState.currentQuestionIndex + 2 // +2 vì currentQuestionIndex bắt đầu từ 0 và chúng ta muốn câu tiếp theo

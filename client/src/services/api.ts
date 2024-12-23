@@ -1,4 +1,5 @@
 import { env } from '@/lib/env'
+import { UserRole } from '@/types'
 import type {
     AuthResponse,
     BaseResponse,
@@ -34,7 +35,7 @@ const createAPI = (prefix?: string) => {
             config.headers.Authorization = `Bearer ${token}`
         }
 
-        // Thêm prefix vào URL nếu có
+        // Add prefix to URL if provided
         if (prefix && !config.url?.startsWith(prefix)) {
             config.url = `${prefix}${config.url}`
         }
@@ -93,7 +94,7 @@ export const authAPI = {
                         achievements: [],
                         isVerified: true,
                         isActive: true,
-                        role: 'user',
+                        role: UserRole.USER,
                     },
                 },
             }

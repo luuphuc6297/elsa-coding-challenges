@@ -1,81 +1,58 @@
-'use client'
-
-import { connectSocket, disconnectSocket } from '@/services/socket'
+/**
+ * Custom hook for managing socket connection
+ */
+import { env } from '@/lib/env'
 import { useAuthStore } from '@/store/useAuthStore'
 import { useEffect, useState } from 'react'
-import type { Socket } from 'socket.io-client'
-
-let globalSocket: Socket | null = null
+import { io, Socket } from 'socket.io-client'
 
 export function useSocket() {
-    const [socket, setSocket] = useState<Socket | null>(globalSocket)
+    const [socket, setSocket] = useState<Socket | null>(null)
     const { logout } = useAuthStore()
 
-    // Khởi tạo socket và xử lý cleanup
     useEffect(() => {
-        if (!globalSocket) {
-            console.log('Initializing global socket')
-            const newSocket = connectSocket()
-            globalSocket = newSocket
-            setSocket(newSocket)
+        // Initialize socket and handle cleanup
+        const socket = io(env.NEXT_PUBLIC_API_URL, {
+            withCredentials: true,
+            transports: ['websocket'],
+            autoConnect: true,
+        })
 
-            // Đợi socket kết nối
-            if (!newSocket.connected) {
-                newSocket.connect()
-            }
-        } else {
-            console.log('Using existing global socket')
-            setSocket(globalSocket)
-        }
+        socket.on('connect', () => {
+            console.log('Socket connected:', socket.id)
+        })
 
-        // Chỉ cleanup khi window/tab đóng
-        const handleBeforeUnload = () => {
-            console.log('Window closing, cleaning up socket')
-            if (globalSocket) {
-                disconnectSocket()
-                globalSocket = null
-            }
-        }
-
-        window.addEventListener('beforeunload', handleBeforeUnload)
-
-        return () => {
-            window.removeEventListener('beforeunload', handleBeforeUnload)
-        }
-    }, []) 
-
-    useEffect(() => {
-        if (!socket) {
-            console.log('No socket available for auth events')
-            return
-        }
-
-        console.log('Setting up auth event listeners')
-        const handleError = (error: any) => {
-            console.error('Socket error in hook:', error)
-            if (error.message === 'Authentication failed') {
+        // Wait for socket connection
+        socket.on('disconnect', (reason) => {
+            console.log('Socket disconnected:', reason)
+            if (reason === 'io server disconnect') {
                 logout()
             }
-        }
+        })
 
-        const handleConnectError = (error: any) => {
-            console.error('Socket connect error in hook:', error)
+        setSocket(socket)
+
+        // Cleanup only when window/tab closes
+        return () => {
+            console.log('Cleaning up socket connection:', socket.id)
+            socket.close()
+        }
+    }, []) // Run only once on mount
+
+    useEffect(() => {
+        if (!socket) return
+
+        socket.on('error', (error: any) => {
+            console.error('Socket error:', error)
             if (error.message === 'Unauthorized') {
                 logout()
             }
-        }
-
-        socket.on('error', handleError)
-        socket.on('connect_error', handleConnectError)
+        })
 
         return () => {
-            console.log('Cleaning up auth event listeners')
-            if (socket) {
-                socket.off('error', handleError)
-                socket.off('connect_error', handleConnectError)
-            }
+            socket.off('error')
         }
-    }, [socket, logout]) // Chạy lại khi socket hoặc logout function thay đổi
+    }, [socket, logout]) // Run when socket or logout function changes
 
     return socket
 }
