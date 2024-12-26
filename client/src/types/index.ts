@@ -164,6 +164,7 @@ export interface LeaderboardEntry {
     username: string
     score: number
     correctAnswers: number
+    timeSpent: number
 }
 
 /**

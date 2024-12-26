@@ -1,4 +1,3 @@
-// Socket Events
 export const EVENTS = {
     // Quiz Flow Events
     JOIN_QUIZ: 'joinQuiz',
@@ -38,9 +37,9 @@ export const QUIZ_STATUS = {
 
 export const CACHE_KEYS = {
     LEADERBOARD: 'leaderboard:',
-    QUIZ_SESSION: 'quiz-session:',
-    TOP_PLAYERS: 'top-players:',
-    CURRENT_QUESTION: 'current-question:',
+    QUIZ_SESSION: 'quizSession:',
+    TOP_PLAYERS: 'topPlayers:',
+    CURRENT_QUESTION: 'currentQuestion:',
 }
 
 /**

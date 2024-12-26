@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { Model, Types } from 'mongoose'
-import { CACHE_KEYS, QUIZ_STATUS } from 'shared/constants'
+import { CACHE_KEYS, EVENTS, QUIZ_STATUS } from 'shared/constants'
 import { RedisService } from 'shared/services/redis.service'
 import { v4 as uuidv4 } from 'uuid'
 import { CreateQuizDto } from '../dtos/create-quiz.dto'
@@ -284,7 +284,7 @@ export class QuizService {
                 },
                 events: [
                     {
-                        type: 'PARTICIPANT_READY',
+                        type: EVENTS.PARTICIPANT_READY,
                         timestamp: new Date(),
                         data: {
                             userId,
@@ -332,7 +332,7 @@ export class QuizService {
         }
 
         session.events.push({
-            type: 'PARTICIPANT_READY',
+            type: EVENTS.PARTICIPANT_READY,
             timestamp: new Date(),
             data: {
                 userId,

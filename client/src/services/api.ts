@@ -21,8 +21,6 @@ const createAPI = (prefix?: string) => {
         withCredentials: true,
     })
 
-    console.log('env.NEXT_PUBLIC_API_URL', env.NEXT_PUBLIC_API_URL)
-
     // Request interceptor
     instance.interceptors.request.use((config) => {
         const token =
@@ -141,10 +139,7 @@ export const quizAPI = {
 
     getQuizById: async (quizId: string): Promise<BaseResponse<Quiz>> => {
         try {
-            console.log('Fetching quiz with ID:', quizId)
-            console.log('API URL:', env.NEXT_PUBLIC_API_URL)
             const response = await quizApi.get(`/${quizId}`)
-            console.log('Quiz API response:', response.data)
             return {
                 success: true,
                 data: response.data,
