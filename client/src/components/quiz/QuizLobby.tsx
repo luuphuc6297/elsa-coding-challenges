@@ -26,110 +26,103 @@ export function QuizLobby({ quizId, onError }: Props) {
     const [isLoading, setIsLoading] = useState(false)
     const isHost = user && participants.length > 0 && participants[0].userId === user._id
 
-    useEffect(() => {
-        if (!socket) {
-            console.log('Socket not available in QuizLobby')
-            return
-        }
+    // useEffect(() => {
+    //     if (!socket) {
+    //         console.log('Socket not available in QuizLobby')
+    //         return
+    //     }
 
-        if (!user) {
-            setError('User not authenticated')
-            return
-        }
+    //     if (!user) {
+    //         setError('User not authenticated')
+    //         return
+    //     }
 
-        console.log('Setting up QuizLobby socket listeners:', {
-            socketId: socket.socketId,
-            connected: socket.isConnected,
-            quizId,
-            userId: user._id,
-        })
+    //     const handleSessionEvent = (event: { type: string; data: any }) => {
+    //         console.log('Received SESSION_EVENT in QuizLobby:', {
+    //             type: event.type,
+    //             data: event.data,
+    //             socketId: socket.socketId,
+    //             currentParticipants: participants,
+    //         })
 
-        const handleSessionEvent = (event: { type: string; data: any }) => {
-            console.log('Received SESSION_EVENT in QuizLobby:', {
-                type: event.type,
-                data: event.data,
-                socketId: socket.socketId,
-                currentParticipants: participants,
-            })
+    //         switch (event.type) {
+    //             case 'PARTICIPANT_JOINED':
+    //                 setParticipants(event.data.participants)
+    //                 break
+    //             case 'PARTICIPANT_LEFT':
+    //                 setParticipants(event.data.participants)
+    //                 break
+    //             case 'PARTICIPANT_READY':
+    //                 console.log('Participant ready event received:', {
+    //                     newParticipants: event.data.participants,
+    //                     currentParticipants: participants,
+    //                     readyCount: event.data.participants.filter((p: any) => p.isReady).length,
+    //                 })
+    //                 setParticipants(event.data.participants)
+    //                 setIsLoading(false)
+    //                 break
+    //             case 'SESSION_STARTED':
+    //                 console.log('Session started event received in lobby:', {
+    //                     event,
+    //                     type: event.type,
+    //                     data: event.data,
+    //                 })
+    //                 setSessionStatus('active')
+    //                 setIsLoading(false)
+    //                 break
+    //         }
+    //     }
 
-            switch (event.type) {
-                case 'PARTICIPANT_JOINED':
-                    setParticipants(event.data.participants)
-                    break
-                case 'PARTICIPANT_LEFT':
-                    setParticipants(event.data.participants)
-                    break
-                case 'PARTICIPANT_READY':
-                    console.log('Participant ready event received:', {
-                        newParticipants: event.data.participants,
-                        currentParticipants: participants,
-                        readyCount: event.data.participants.filter((p: any) => p.isReady).length,
-                    })
-                    setParticipants(event.data.participants)
-                    setIsLoading(false)
-                    break
-                case 'SESSION_STARTED':
-                    console.log('Session started event received in lobby:', {
-                        event,
-                        type: event.type,
-                        data: event.data,
-                    })
-                    setSessionStatus('active')
-                    setIsLoading(false)
-                    break
-            }
-        }
+    //     const handleError = (error: any) => {
+    //         console.error('Socket error in QuizLobby:', {
+    //             error,
+    //             socketId: socket.socketId,
+    //             connected: socket.isConnected,
+    //         })
+    //         setError(error.message)
+    //         setIsLoading(false)
+    //     }
 
-        const handleError = (error: any) => {
-            console.error('Socket error in QuizLobby:', {
-                error,
-                socketId: socket.socketId,
-                connected: socket.isConnected,
-            })
-            setError(error.message)
-            setIsLoading(false)
-        }
+    //     socket.on('SESSION_EVENT', handleSessionEvent)
+    //     socket.on('error', handleError)
 
-        socket.on('SESSION_EVENT', handleSessionEvent)
-        socket.on('error', handleError)
+    //     // Join lobby
+    //     console.log('Joining quiz lobby:', {
+    //         quizId,
+    //         userId: user._id,
+    //         username: user.username,
+    //         socketId: socket.socketId,
+    //     })
+    //     socket.emit('JOIN_QUIZ', {
+    //         quizId,
+    //         userId: user._id,
+    //         username: user.username,
+    //     })
 
-        // Join lobby
-        console.log('Joining quiz lobby:', {
-            quizId,
-            userId: user._id,
-            username: user.username,
-            socketId: socket.socketId,
-        })
-        socket.emit('JOIN_QUIZ', {
-            quizId,
-            userId: user._id,
-            username: user.username,
-        })
+    //     return () => {
+    //         console.log('Cleaning up QuizLobby socket listeners:', {
+    //             socketId: socket.socketId,
+    //             connected: socket.isConnected,
+    //         })
 
-        return () => {
-            console.log('Cleaning up QuizLobby socket listeners:', {
-                socketId: socket.socketId,
-                connected: socket.isConnected,
-            })
+    //         if (socket) {
+    //             socket.off('SESSION_EVENT', handleSessionEvent)
+    //             socket.off('error', handleError)
 
-            if (socket) {
-                socket.off('SESSION_EVENT', handleSessionEvent)
-                socket.off('error', handleError)
-
-                if (socket.isConnected) {
-                    console.log('Leaving quiz lobby:', {
-                        quizId,
-                        userId: user._id,
-                        socketId: socket.socketId,
-                    })
-                    socket.emit('LEAVE_QUIZ', {
-                        quizId,
-                        userId: user._id,
-                    })
-                }
-            }
-        }
-    }, [socket, quizId, user])
+    //             if (socket.isConnected) {
+    //                 console.log('Leaving quiz lobby:', {
+    //                     quizId,
+    //                     userId: user._id,
+    //                     socketId: socket.socketId,
+    //                 })
+    //                 socket.emit('LEAVE_QUIZ', {
+    //                     quizId,
+    //                     userId: user._id,
+    //                 })
+    //             }
+    //         }
+    //     }
+    // }, [socket, quizId, user])
 
     const handleReady = async () => {
         if (!user || !socket) {

@@ -6,18 +6,17 @@ import { useUser } from '@/hooks/useUser'
 import { quizAPI } from '@/services/api'
 import { Alert, Box, Button, Card, CardContent, Container, Grid, Typography } from '@mui/material'
 import { useQuery } from '@tanstack/react-query'
-import { format } from 'date-fns'
-import { useParams, useRouter, notFound } from 'next/navigation'
-import { useEffect, useState } from 'react'
 import axios from 'axios'
+import { format } from 'date-fns'
+import { notFound, useParams, useRouter } from 'next/navigation'
+import { useCallback, useEffect, useMemo } from 'react'
 
 export default function QuizDetailPage() {
     const params = useParams()
     const router = useRouter()
     const quizId = params.quizId as string
-    const socket = useSocket()
+    const { socket, isConnected, isConnecting } = useSocket()
     const { user } = useUser()
-    const [socketInitialized, setSocketInitialized] = useState(false)
 
     const {
         data: quiz,
@@ -28,15 +27,17 @@ export default function QuizDetailPage() {
         queryKey: ['quiz', quizId],
         queryFn: async () => {
             try {
-                console.log('Fetching quiz:', quizId)
                 const response = await quizAPI.getQuizById(quizId)
-                console.log('Quiz response:', response)
+
                 if (!response.success || !response.data) {
                     return null
                 }
-                return response.data
+
+                const quizData = response.data
+
+                return quizData
             } catch (error) {
-                console.error('Quiz fetch error:', error)
+                console.error('[Quiz API] Fetch error:', error)
                 if (axios.isAxiosError(error) && error.response?.status === 404) {
                     return null
                 }
@@ -44,98 +45,99 @@ export default function QuizDetailPage() {
             }
         },
         retry: false,
-        staleTime: 30000,
+        staleTime: 0,
     })
 
-    useEffect(() => {
-        if (!socket) {
-            console.log('Socket not initialized in quiz detail')
-            setSocketInitialized(false)
-            return
-        }
+    // Memoize quiz status
+    const quizStatus = useMemo(() => {
+        if (!quiz) return null
 
-        setSocketInitialized(true)
-        console.log('Setting up quiz detail socket listeners')
+        const now = new Date()
+        const startTime = new Date(quiz.startTime)
+        const endTime = new Date(quiz.endTime)
+
+        const isAvailable = true
+        const isUpcoming = quiz.isActive && startTime > now
+        // const isEnded = !quiz.isActive || endTime < now
+        const isEnded = false
+
+        return {
+            isAvailable,
+            isUpcoming,
+            isEnded,
+            startTime,
+            endTime,
+        }
+    }, [quiz])
+
+    useEffect(() => {
+        if (!socket || !isConnected || !quizId) return
 
         const handleQuizUpdate = () => {
-            console.log('Received QUIZ_UPDATE event')
+            console.log('[Socket] Received QUIZ_UPDATE event')
             refetch()
         }
 
+        console.log('[Socket] Setting up quiz update listener')
         socket.on('QUIZ_UPDATE', handleQuizUpdate)
 
         return () => {
-            if (socket) {
-                console.log('Cleaning up quiz detail socket listeners')
-                socket.off('QUIZ_UPDATE', handleQuizUpdate)
-            }
+            console.log('[Socket] Cleaning up quiz update listener')
+            socket.off('QUIZ_UPDATE', handleQuizUpdate)
         }
-    }, [socket, refetch])
+    }, [socket, isConnected, quizId, refetch])
 
-    const handleJoinQuiz = async () => {
+    const handleJoinQuiz = useCallback(async () => {
         try {
-            if (!quiz || !user || !socket) {
-                console.log('Cannot join quiz: missing dependencies', {
+            if (!quiz || !user || !socket || !isConnected) {
+                console.log('[Quiz Action] Cannot join quiz:', {
                     hasQuiz: !!quiz,
                     hasUser: !!user,
-                    hasSocket: !!socket
+                    hasSocket: !!socket,
+                    isConnected,
                 })
                 return
             }
 
-            console.log('Emitting JOIN_QUIZ event:', {
-                quizId,
-                userId: user._id,
-                username: user.username
-            })
-
             socket.emit('JOIN_QUIZ', {
                 quizId,
                 userId: user._id,
-                username: user.username
+                username: user.username,
             })
 
             router.push(`/quiz/detail/${quizId}/play`)
         } catch (error) {
-            console.error('Failed to join quiz:', error)
+            console.error('[Quiz Action] Failed to join quiz:', error)
         }
-    }
+    }, [quiz, user, socket, isConnected, quizId, router])
 
-    const handleStartQuiz = async () => {
+    const handleStartQuiz = useCallback(async () => {
         try {
-            if (!quiz || !user || !socket || !socketInitialized) {
-                console.log('Cannot start quiz: missing dependencies')
+            if (!quiz || !user || !socket || !isConnected) {
+                console.log('[Quiz Action] Cannot start quiz:', {
+                    hasQuiz: !!quiz,
+                    hasUser: !!user,
+                    hasSocket: !!socket,
+                    isConnected,
+                })
                 return
             }
+
+            console.log('[Quiz Action] Starting quiz:', {
+                quizId: quiz._id,
+                userId: user._id,
+            })
 
             socket.emit('START_QUIZ', {
-                quizId: quiz.quizId,
+                quizId: quiz._id,
                 userId: user._id,
             })
 
-            router.push(`/quiz/detail/${quiz.quizId}/play`)
+            router.push(`/quiz/detail/${quiz._id}/play`)
         } catch (error) {
-            console.error('Failed to start quiz:', error)
+            console.error('[Quiz Action] Failed to start quiz:', error)
         }
-    }
-
-    const handleEndQuiz = async () => {
-        try {
-            if (!quiz || !user || !socket || !socketInitialized) {
-                console.log('Cannot end quiz: missing dependencies')
-                return
-            }
-
-            socket.emit('END_QUIZ', {
-                quizId: quiz.quizId,
-                userId: user._id,
-            })
-
-            router.push(`/quiz/detail/${quiz.quizId}/results`)
-        } catch (error) {
-            console.error('Failed to end quiz:', error)
-        }
-    }
+    }, [quiz, user, socket, isConnected, router])
 
     if (isLoading) {
         return <Loading message="Loading quiz details..." />
@@ -149,18 +151,26 @@ export default function QuizDetailPage() {
         )
     }
 
-    if (!quiz) {
+    if (!quiz || !quizStatus) {
         notFound()
     }
 
-    const now = new Date()
-    const startTime = new Date(quiz.startTime)
-    const endTime = new Date(quiz.endTime)
-    const isAvailable = quiz.isActive && startTime <= now && endTime >= now
-    const isUpcoming = quiz.isActive && startTime > now
-    const isEnded = endTime < now
+    const { isAvailable, isUpcoming, isEnded, startTime, endTime } = quizStatus
 
-    console.log('isUpcoming')
+    // Log final render state
+    console.log('Quiz render state:', {
+        isAvailable,
+        isUpcoming,
+        isEnded,
+        startTime: startTime.toISOString(),
+        endTime: endTime.toISOString(),
+        isHost: user?._id === quiz.hostId,
+        socketStatus: {
+            isConnected,
+            isConnecting,
+        },
+    })
+
     return (
         <Container maxWidth="lg" sx={{ py: 4 }}>
             <Grid container spacing={4}>
@@ -204,20 +214,14 @@ export default function QuizDetailPage() {
                                         fullWidth
                                         size="large"
                                         onClick={handleStartQuiz}
-                                        disabled={!socketInitialized}
+                                        disabled={!isConnected || isConnecting || isEnded}
                                     >
-                                        {!socketInitialized ? 'Connecting...' : 'Start Quiz'}
+                                        {isConnecting
+                                            ? 'Connecting...'
+                                            : isEnded
+                                            ? 'Quiz Ended'
+                                            : 'Start Quiz'}
                                     </Button>
-                                    {/* <Button
-                                        variant="contained"
-                                        color="error"
-                                        fullWidth
-                                        size="large"
-                                        onClick={handleEndQuiz}
-                                        disabled={!socketInitialized || !isAvailable}
-                                    >
-                                        {!socketInitialized ? 'Connecting...' : 'End Quiz'}
-                                    </Button> */}
                                 </Box>
                             ) : (
                                 <Button
@@ -226,15 +230,17 @@ export default function QuizDetailPage() {
                                     fullWidth
                                     size="large"
                                     onClick={handleJoinQuiz}
-                                    disabled={!socketInitialized || !isAvailable}
+                                    disabled={
+                                        !isConnected || isConnecting || !isAvailable || isEnded
+                                    }
                                 >
-                                    {!socketInitialized
+                                    {isConnecting
                                         ? 'Connecting...'
+                                        : isEnded
+                                        ? 'Quiz Ended'
                                         : isAvailable
                                         ? 'Join Quiz'
-                                        : isUpcoming
-                                        ? 'Coming Soon'
-                                        : 'Quiz Ended'}
+                                        : 'Coming Soon'}
                                 </Button>
                             )}
                         </CardContent>

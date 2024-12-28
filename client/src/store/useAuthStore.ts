@@ -54,6 +54,8 @@ export const useAuthStore = create<AuthState>()(
 
                         const { token, user } = response.data
 
+                        console.log('user___', user)
+
                         if (!token) {
                             throw new Error('No token received from server')
                         }

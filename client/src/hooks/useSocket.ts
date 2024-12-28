@@ -95,6 +95,7 @@ export function useSocket() {
 
     return {
         ...socket,
+        socket: socketManager.getSocket(),
         waitForConnection: socketManager.waitForConnection.bind(socketManager),
         on: socketManager.on.bind(socketManager),
         off: socketManager.off.bind(socketManager),

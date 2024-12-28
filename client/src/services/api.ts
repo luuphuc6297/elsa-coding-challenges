@@ -69,13 +69,13 @@ export const authAPI = {
         debugger
         try {
             const response = await authApi.post<AuthResponse>('/login', { email, password })
-            console.log('response_login', response)
+            console.log('response__', response)
             return {
                 success: true,
                 data: {
                     token: response.data.accessToken,
                     user: {
-                        _id: response.data.user.id,
+                        _id: response.data.user._id,
                         email: response.data.user.email,
                         username: response.data.user.username,
                         totalScore: 0,
