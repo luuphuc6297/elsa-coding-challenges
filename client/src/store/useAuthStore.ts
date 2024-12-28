@@ -1,8 +1,22 @@
+import { AUTH_EVENTS, authEvents } from '@/lib/events'
 import { authAPI } from '@/services/api'
-import { getSocket } from '@/services/socket'
+import { socketManager } from '@/services/socket'
 import type { User } from '@/types'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+
+const getStoredToken = () => {
+    if (typeof window === 'undefined') return null
+
+    return (
+        localStorage.getItem('token') ||
+        document.cookie
+            .split('; ')
+            .find((row) => row.startsWith('token='))
+            ?.split('=')[1] ||
+        null
+    )
+}
 
 interface AuthState {
     user: User | null
@@ -18,78 +32,91 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>()(
     persist(
-        (set) => ({
-            user: null,
-            token: null,
-            isAuthenticated: false,
-            isLoading: false,
-            error: null,
+        (set) => {
+            // Check if token exists in localStorage or cookies
+            const storedToken = getStoredToken()
 
-            login: async (email: string, password: string) => {
-                try {
-                    set({ isLoading: true, error: null })
-                    const response = await authAPI.login(email, password)
+            return {
+                user: null,
+                token: storedToken,
+                isAuthenticated: !!storedToken,
+                isLoading: false,
+                error: null,
 
-                    if (!response.success || !response.data) {
-                        throw new Error(response.message || 'Login failed')
+                login: async (email: string, password: string) => {
+                    try {
+                        set({ isLoading: true, error: null })
+                        const response = await authAPI.login(email, password)
+
+                        if (!response.success || !response.data) {
+                            throw new Error(response.message || 'Login failed')
+                        }
+
+                        const { token, user } = response.data
+
+                        if (!token) {
+                            throw new Error('No token received from server')
+                        }
+
+                        if (typeof window !== 'undefined') {
+                            localStorage.setItem('token', token)
+                            document.cookie = `token=${token}; path=/; max-age=${
+                                60 * 60 * 24 * 7
+                            }; SameSite=Lax; secure`
+                        }
+
+                        set({
+                            user,
+                            token,
+                            isAuthenticated: true,
+                            isLoading: false,
+                            error: null,
+                        })
+
+                        // Emit login success event
+                        authEvents.emit(AUTH_EVENTS.LOGIN_SUCCESS, { user, token })
+                    } catch (error) {
+                        console.error('Login error:', error)
+                        set({
+                            error:
+                                error instanceof Error
+                                    ? error.message
+                                    : 'An error occurred during login',
+                            isLoading: false,
+                            isAuthenticated: false,
+                            user: null,
+                            token: null,
+                        })
+                        throw error
                     }
+                },
 
-                    const { token, user } = response.data
+                logout: async () => {
+                    try {
+                        if (typeof window !== 'undefined') {
+                            localStorage.removeItem('token')
+                            document.cookie =
+                                'token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT; SameSite=Lax; secure'
+                        }
 
-                    // Store token in localStorage and cookie for SSR
-                    localStorage.setItem('token', token)
-                    document.cookie = `token=${token}; path=/; max-age=${60 * 60 * 24 * 7}` // 7 days
+                        socketManager.disconnect()
+                        authEvents.emit(AUTH_EVENTS.LOGOUT)
 
-                    set({
-                        user,
-                        token,
-                        isAuthenticated: true,
-                        isLoading: false,
-                        error: null,
-                    })
+                        set({
+                            user: null,
+                            token: null,
+                            isAuthenticated: false,
+                        })
+                    } catch (error) {
+                        console.error('Logout error:', error)
+                    }
+                },
 
-                    // Initialize socket connection
-                    getSocket()
-                } catch (error) {
-                    console.error('Login error:', error)
-                    set({
-                        error:
-                            error instanceof Error
-                                ? error.message
-                                : 'An error occurred during login',
-                        isLoading: false,
-                        isAuthenticated: false,
-                        user: null,
-                        token: null,
-                    })
-                    throw error
-                }
-            },
+                clearError: () => set({ error: null }),
 
-            logout: async () => {
-                try {
-                    // Clear token from localStorage and cookie
-                    localStorage.removeItem('token')
-                    document.cookie = 'token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;'
-
-                    // Disconnect socket
-                    getSocket().disconnect()
-
-                    // Clear auth state
-                    set({
-                        user: null,
-                        token: null,
-                        isAuthenticated: false,
-                    })
-                } catch (error) {
-                    console.error('Logout error:', error)
-                }
-            },
-
-            clearError: () => set({ error: null }),
-
-            updateUser: (user: User) => set({ user }),
-        }),
+                updateUser: (user: User) => set({ user }),
+            }
+        },
         {
             name: 'auth-storage',
             partialize: (state) => ({

@@ -1,5 +1,4 @@
 import { env } from '@/lib/env'
-import { UserRole } from '@/types'
 import type {
     AuthResponse,
     BaseResponse,
@@ -9,6 +8,7 @@ import type {
     QuizSession,
     User,
 } from '@/types'
+import { UserRole } from '@/types'
 import axios from 'axios'
 
 // Base API instance
@@ -21,7 +21,6 @@ const createAPI = (prefix?: string) => {
         withCredentials: true,
     })
 
-    // Request interceptor
     instance.interceptors.request.use((config) => {
         const token =
             document.cookie
@@ -33,7 +32,6 @@ const createAPI = (prefix?: string) => {
             config.headers.Authorization = `Bearer ${token}`
         }
 
-        // Add prefix to URL if provided
         if (prefix && !config.url?.startsWith(prefix)) {
             config.url = `${prefix}${config.url}`
         }
@@ -41,7 +39,6 @@ const createAPI = (prefix?: string) => {
         return config
     })
 
-    // Response interceptor
     instance.interceptors.response.use(
         (response) => response,
         (error) => {
@@ -69,19 +66,14 @@ export const authAPI = {
         email: string,
         password: string
     ): Promise<BaseResponse<{ token: string; user: User }>> => {
+        debugger
         try {
-            console.log('Sending login request with:', { email })
             const response = await authApi.post<AuthResponse>('/login', { email, password })
-            console.log('Login API response:', {
-                status: response.status,
-                data: response.data,
-                headers: response.headers,
-            })
-
+            console.log('response_login', response)
             return {
                 success: true,
                 data: {
-                    token: response.data.access_token,
+                    token: response.data.accessToken,
                     user: {
                         _id: response.data.user.id,
                         email: response.data.user.email,

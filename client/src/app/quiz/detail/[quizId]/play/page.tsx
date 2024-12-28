@@ -58,9 +58,9 @@ export default function QuizPlayPage() {
     useEffect(() => {
         console.log('QuizPlayPage state:', {
             isSessionStarted,
-            hasSocket: !!socket,
-            socketId: socket?.id,
-            connected: socket?.connected,
+            hasSocket: !!socket.socket,
+            socketId: socket.socket?.id,
+            connected: socket.socket?.connected,
             questionData,
         })
     }, [isSessionStarted, socket, questionData])

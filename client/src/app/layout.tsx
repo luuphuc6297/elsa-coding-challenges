@@ -1,6 +1,7 @@
 import { ThemeRegistry } from '@/components/theme-registry'
 import { Providers } from '@/providers'
 import { Metadata } from 'next'
+import { SocketProvider } from '@/components/providers/SocketProvider'
 
 export const metadata: Metadata = {
     title: {
@@ -15,9 +16,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     return (
         <html lang="en">
             <body>
-                <ThemeRegistry>
-                    <Providers>{children}</Providers>
-                </ThemeRegistry>
+                <SocketProvider>
+                    <ThemeRegistry>
+                        <Providers>{children}</Providers>
+                    </ThemeRegistry>
+                </SocketProvider>
             </body>
         </html>
     )

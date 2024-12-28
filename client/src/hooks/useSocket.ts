@@ -1,58 +1,103 @@
 /**
  * Custom hook for managing socket connection
  */
-import { env } from '@/lib/env'
+import { SocketEvent, socketManager, SocketState } from '@/services/socket'
 import { useAuthStore } from '@/store/useAuthStore'
-import { useEffect, useState } from 'react'
-import { io, Socket } from 'socket.io-client'
+import { useCallback, useEffect, useState } from 'react'
 
 export function useSocket() {
-    const [socket, setSocket] = useState<Socket | null>(null)
-    const { logout } = useAuthStore()
+    const [socket, setSocket] = useState<SocketState>({
+        isConnected: false,
+        isConnecting: false,
+        connectionError: null,
+        socketId: null,
+        socket: null,
+    })
+    const { logout, isAuthenticated } = useAuthStore()
 
-    useEffect(() => {
-        // Initialize socket and handle cleanup
-        const socket = io(env.NEXT_PUBLIC_API_URL, {
-            withCredentials: true,
-            transports: ['websocket'],
-            autoConnect: true,
-        })
+    const handleConnect = useCallback(() => {
+        setSocket((prev) => ({
+            ...prev,
+            isConnected: true,
+            isConnecting: false,
+            connectionError: null,
+            socketId: socketManager.getSocketId(),
+        }))
+    }, [])
 
-        socket.on('connect', () => {
-            console.log('Socket connected:', socket.id)
-        })
+    const handleError = useCallback(
+        (error: Error, type: 'connect' | 'general' = 'general') => {
+            console.error(`Socket ${type} error:`, error.message)
+            setSocket((prev) => ({
+                ...prev,
+                isConnected: false,
+                isConnecting: false,
+                connectionError: error,
+                socketId: null,
+            }))
 
-        // Wait for socket connection
-        socket.on('disconnect', (reason) => {
-            console.log('Socket disconnected:', reason)
-            if (reason === 'io server disconnect') {
-                logout()
-            }
-        })
-
-        setSocket(socket)
-
-        // Cleanup only when window/tab closes
-        return () => {
-            console.log('Cleaning up socket connection:', socket.id)
-            socket.close()
-        }
-    }, []) // Run only once on mount
-
-    useEffect(() => {
-        if (!socket) return
-
-        socket.on('error', (error: any) => {
-            console.error('Socket error:', error)
             if (error.message === 'Unauthorized') {
                 logout()
             }
+        },
+        [logout]
+    )
+
+    const handleDisconnect = useCallback(
+        (reason: string) => {
+            console.log('Socket disconnected:', reason)
+            setSocket((prev) => ({
+                ...prev,
+                isConnected: false,
+                socketId: null,
+            }))
+
+            if (reason === 'io server disconnect') {
+                logout()
+            }
+        },
+        [logout]
+    )
+
+    useEffect(() => {
+        // Only initialize socket if authenticated
+        if (!isAuthenticated) {
+            return
+        }
+
+        const eventHandlers = {
+            [SocketEvent.CONNECT]: handleConnect,
+            [SocketEvent.CONNECT_ERROR]: (error: Error) => handleError(error, 'connect'),
+            [SocketEvent.DISCONNECT]: handleDisconnect,
+            [SocketEvent.ERROR]: (error: Error) => handleError(error),
+        }
+
+        const existingSocket = socketManager.getSocket()
+        if (existingSocket) {
+            setSocket((prev) => ({
+                ...prev,
+                socket: existingSocket,
+                isConnected: existingSocket.connected,
+                socketId: socketManager.getSocketId(),
+            }))
+        }
+
+        Object.entries(eventHandlers).forEach(([event, handler]) => {
+            socketManager.on(event, handler)
         })
 
         return () => {
-            socket.off('error')
+            Object.entries(eventHandlers).forEach(([event, handler]) => {
+                socketManager.off(event, handler)
+            })
         }
-    }, [socket, logout]) // Run when socket or logout function changes
+    }, [handleConnect, handleError, handleDisconnect, isAuthenticated])
 
-    return socket
+    return {
+        ...socket,
+        waitForConnection: socketManager.waitForConnection.bind(socketManager),
+        on: socketManager.on.bind(socketManager),
+        off: socketManager.off.bind(socketManager),
+        emit: socketManager.emit.bind(socketManager),
+    }
 }

@@ -187,11 +187,12 @@ export interface Leaderboard {
  * Interface for authentication response
  */
 export interface AuthResponse {
-    access_token: string
+    accessToken: string
     user: {
         id: string
         email: string
         username: string
+        role: UserRole
     }
 }
 

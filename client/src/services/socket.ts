@@ -2,272 +2,344 @@ import { env } from '@/lib/env'
 import { EVENTS } from '@/shared/constants'
 import { io, Socket } from 'socket.io-client'
 
-interface SocketResponse<T = unknown> {
-    success: boolean
-    data?: T
-    error?: string
+export interface SocketState {
+    isConnected: boolean
+    isConnecting: boolean
+    connectionError: Error | null
+    socketId: string | null
+    socket: Socket | null
 }
 
-interface SessionResponse {
-    session: {
-        participants: Array<{
-            userId: string
-            isReady: boolean
-        }>
-    }
+export type SocketEventCallback = (...args: any[]) => void
+
+export enum SocketEvent {
+    CONNECT = 'connect',
+    DISCONNECT = 'disconnect',
+    CONNECT_ERROR = 'connect_error',
+    ERROR = 'error',
+    RECONNECT = 'reconnect',
 }
 
-let socket: Socket
+const SOCKET_CONFIG = {
+    RETRY_DELAY: 3000,
+    MAX_RETRIES: 3,
+    CONNECTION_TIMEOUT: 5000,
+} as const
 
-export const initSocket = () => {
-    if (socket) {
-        console.log('Socket already initialized')
-        return socket
+class SocketManager {
+    private static instance: SocketManager
+    private socket: Socket | null = null
+    private eventHandlers: Map<string, Set<SocketEventCallback>> = new Map()
+
+    private constructor() {}
+
+    static getInstance(): SocketManager {
+        if (!SocketManager.instance) {
+            SocketManager.instance = new SocketManager()
+        }
+        return SocketManager.instance
     }
 
-    console.log('Initializing socket connection to:', `${env.NEXT_PUBLIC_SOCKET_URL}/quiz`)
-    socket = io(`${env.NEXT_PUBLIC_SOCKET_URL}/quiz`, {
-        autoConnect: true,
-        withCredentials: true,
-        transports: ['websocket'],
-        reconnection: true,
-        reconnectionAttempts: 5,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-        timeout: 20000,
-        auth: {
-            token: localStorage.getItem('token'),
-        },
-        extraHeaders: {
-            Authorization: `Bearer ${localStorage.getItem('token')}`,
-        },
-    })
+    private getAuthToken(): string | null {
+        const token = localStorage.getItem('token')
+        if (token && token !== 'undefined' && token !== 'null') {
+            return token
+        }
 
-    socket.on('connect', () => {
-        console.log('Socket connected with details:', {
-            id: socket.id,
-            transport: socket.io.engine.transport.name,
-            connected: socket.connected,
-            auth: socket.auth,
-            headers: socket.io.opts.extraHeaders,
+        const tokenFromCookie = document.cookie
+            .split(';')
+            .find((row) => row.trim().startsWith('token='))
+            ?.split('=')[1]
+            ?.trim()
+
+        if (tokenFromCookie && tokenFromCookie !== 'undefined' && tokenFromCookie !== 'null') {
+            return tokenFromCookie
+        }
+
+        console.warn('No valid token found in localStorage or cookies')
+        return null
+    }
+
+    private handleSocketEvent(event: string, ...args: any[]): void {
+        const handlers = this.eventHandlers.get(event)
+        if (handlers) {
+            handlers.forEach((handler) => {
+                try {
+                    handler(...args)
+                } catch (error) {
+                    console.error(`Error in ${event} handler:`, error)
+                }
+            })
+        }
+    }
+
+    private setupDefaultEventHandlers(): void {
+        if (!this.socket) return
+
+        this.socket.on(SocketEvent.CONNECT, () => {
+            const connectionInfo = {
+                id: this.socket?.id,
+                transport: this.socket?.io?.engine?.transport?.name,
+                connected: this.socket?.connected,
+                auth: this.socket?.auth,
+            }
+            console.log('Socket connected with details:', connectionInfo)
+            this.handleSocketEvent(SocketEvent.CONNECT, connectionInfo)
         })
-    })
 
-    socket.on('connect_error', (error) => {
-        console.error('Socket connection error:', {
-            message: error.message,
-            name: error.name,
-            context: {
-                url: env.NEXT_PUBLIC_SOCKET_URL,
-                transport: socket.io.engine?.transport?.name,
-                readyState: socket.io.engine?.readyState,
-                auth: socket.auth,
-                headers: socket.io.opts.extraHeaders,
+        this.socket.on(SocketEvent.CONNECT_ERROR, (error) => {
+            const errorInfo = {
+                message: error.message,
+                name: error.name,
+                context: {
+                    url: env.NEXT_PUBLIC_SOCKET_URL,
+                    transport: this.socket?.io?.engine?.transport?.name,
+                    readyState: this.socket?.io?.engine?.readyState,
+                    auth: this.socket?.auth,
+                },
+            }
+            console.error('Socket connection error:', errorInfo)
+            this.handleSocketEvent(SocketEvent.CONNECT_ERROR, error, errorInfo)
+        })
+
+        this.socket.on(SocketEvent.ERROR, (error) => {
+            const errorInfo = {
+                error,
+                wasConnected: this.socket?.connected,
+                id: this.socket?.id,
+            }
+            console.error('Socket error:', errorInfo)
+            this.handleSocketEvent(SocketEvent.ERROR, error, errorInfo)
+        })
+
+        this.socket.on(SocketEvent.RECONNECT, (attemptNumber) => {
+            const token = this.getAuthToken()
+            console.log('Token:', token)
+            if (token && this.socket) {
+                this.socket.auth = { token }
+                const reconnectInfo = {
+                    attemptNumber,
+                    id: this.socket.id,
+                    connected: this.socket.connected,
+                }
+                console.log('Socket reconnected:', reconnectInfo)
+                this.handleSocketEvent(SocketEvent.RECONNECT, reconnectInfo)
+            }
+        })
+
+        this.socket.on(SocketEvent.DISCONNECT, (reason) => {
+            const disconnectInfo = {
+                reason,
+                id: this.socket?.id,
+                wasConnected: this.socket?.connected,
+            }
+            console.log('Socket disconnected:', disconnectInfo)
+            this.handleSocketEvent(SocketEvent.DISCONNECT, reason, disconnectInfo)
+        })
+    }
+
+    async waitForConnection(timeout = SOCKET_CONFIG.CONNECTION_TIMEOUT): Promise<void> {
+        if (this.isConnected()) return
+
+        return new Promise((resolve, reject) => {
+            const start = Date.now()
+            const checkConnection = () => {
+                if (this.isConnected()) {
+                    resolve()
+                } else if (Date.now() - start >= timeout) {
+                    reject(new Error('Socket connection timeout'))
+                } else {
+                    setTimeout(checkConnection, 100)
+                }
+            }
+            checkConnection()
+        })
+    }
+
+    connect(): Socket {
+        if (this.socket?.connected) {
+            console.log('Socket already connected:', {
+                id: this.socket.id,
+                auth: this.socket.auth,
+            })
+            return this.socket
+        }
+
+        const token = this.getAuthToken()
+        if (!token) {
+            throw new Error('Authentication required')
+        }
+
+        this.socket = io(`${env.NEXT_PUBLIC_SOCKET_URL}/quiz`, {
+            withCredentials: true,
+            transports: ['websocket'],
+            autoConnect: false,
+            reconnection: true,
+            reconnectionDelay: SOCKET_CONFIG.RETRY_DELAY,
+            reconnectionAttempts: SOCKET_CONFIG.MAX_RETRIES,
+            timeout: SOCKET_CONFIG.CONNECTION_TIMEOUT,
+            auth: {
+                token,
+            },
+            extraHeaders: {
+                Authorization: `Bearer ${token}`,
             },
         })
-    })
 
-    socket.on('disconnect', (reason) => {
-        console.log('Socket disconnected:', {
-            reason,
-            wasConnected: socket.connected,
-            id: socket.id,
-        })
-    })
-
-    socket.on('error', (error) => {
-        console.error('Socket error:', {
-            error,
-            wasConnected: socket.connected,
-            id: socket.id,
-        })
-    })
-
-    socket.on('reconnect', (attemptNumber) => {
-        console.log('Socket reconnected:', {
-            attemptNumber,
-            id: socket.id,
-            connected: socket.connected,
-        })
-    })
-
-    socket.on('reconnect_error', (error) => {
-        console.error('Socket reconnection error:', {
-            error,
-            attempts: socket.io.reconnectionAttempts,
-            delay: socket.io.reconnectionDelay,
-        })
-    })
-
-    socket.on('reconnect_failed', () => {
-        console.error('Socket reconnection failed:', {
-            attempts: socket.io.reconnectionAttempts,
-            wasConnected: socket.connected,
-        })
-        window.alert('Connection to quiz server failed. Please refresh the page.')
-    })
-
-    // Quiz specific events
-    socket.on(EVENTS.SESSION_EVENT, (event) => {
-        console.log('Received SESSION_EVENT:', {
-            type: event.type,
-            data: event.data,
-            socketId: socket.id,
+        this.socket.on(SocketEvent.CONNECT_ERROR, (error) => {
+            console.error('Socket connection error:', {
+                message: error.message,
+                name: error.name,
+                stack: error.stack,
+            })
         })
 
-        // Re-emit specific events based on type
-        if (event.type === EVENTS.QUESTION_STARTED) {
-            socket.emit(EVENTS.QUESTION_STARTED, event.data)
-        } else if (event.type === EVENTS.QUESTION_ENDED) {
-            socket.emit(EVENTS.QUESTION_ENDED, event.data)
+        this.socket.connect()
+
+        this.setupDefaultEventHandlers()
+        return this.socket
+    }
+
+    on(event: string, callback: SocketEventCallback): void {
+        if (!this.eventHandlers.has(event)) {
+            this.eventHandlers.set(event, new Set())
         }
-    })
+        this.eventHandlers.get(event)?.add(callback)
 
-    socket.on(EVENTS.QUESTION_STARTED, (data) => {
-        console.log('Received QUESTION_STARTED:', {
-            data,
-            socketId: socket.id,
-        })
-    })
-
-    socket.on(EVENTS.QUESTION_ENDED, (data) => {
-        console.log('Received QUESTION_ENDED:', {
-            data,
-            socketId: socket.id,
-        })
-    })
-
-    socket.on(EVENTS.QUIZ_ERROR, (error) => {
-        console.error('Quiz error:', {
-            error,
-            socketId: socket.id,
-            wasConnected: socket.connected,
-        })
-    })
-
-    return socket
-}
-
-export const getSocket = () => {
-    if (!socket) {
-        return initSocket()
-    }
-    return socket
-}
-
-export const connectSocket = () => {
-    const socket = getSocket()
-    if (!socket.connected) {
-        console.log('Connecting socket:', {
-            id: socket.id,
-            wasConnected: socket.connected,
-        })
-        socket.connect()
-    }
-    return socket
-}
-
-export const disconnectSocket = () => {
-    if (socket) {
-        console.log('Disconnecting socket:', {
-            id: socket.id,
-            wasConnected: socket.connected,
-        })
-        socket.disconnect()
-    }
-}
-
-export const emitEvent = <T = unknown, R = unknown>(
-    eventName: string,
-    data: T,
-    callback?: (response: SocketResponse<R>) => void
-) => {
-    const socket = getSocket()
-    console.log('Attempting to emit event:', {
-        eventName,
-        data,
-        socketExists: !!socket,
-        socketConnected: socket?.connected,
-        socketId: socket?.id,
-        socketState: {
-            connected: socket?.connected,
-            disconnected: socket?.disconnected,
-        },
-    })
-
-    if (socket && socket.connected) {
-        console.log(`Emitting ${eventName}:`, {
-            data,
-            socketId: socket.id,
-            transport: socket.io.engine.transport.name,
-            readyState: socket.io.engine.readyState,
-            auth: socket.auth,
-            headers: socket.io.opts.extraHeaders,
-        })
-        socket.emit(eventName, data, callback)
-    } else {
-        console.error(`Cannot emit ${eventName}: socket not connected`, {
-            socketExists: !!socket,
-            connected: socket?.connected,
-            disconnected: socket?.disconnected,
-            connecting: socket?.io?.engine?.transport?.name,
-            socketId: socket?.id,
-            transport: socket?.io?.engine?.transport?.name,
-            readyState: socket?.io?.engine?.readyState,
-        })
-    }
-}
-
-export const joinQuiz = (quizId: string, userId: string, username: string) => {
-    emitEvent(EVENTS.JOIN_QUIZ, { quizId, userId, username })
-}
-
-export const leaveQuiz = (quizId: string) => {
-    emitEvent(EVENTS.LEAVE_QUIZ, { quizId })
-}
-
-export const participantReady = (quizId: string, userId: string) => {
-    console.log('Emitting participantReady event:', { quizId, userId })
-    emitEvent(EVENTS.PARTICIPANT_READY, { quizId, userId }, (response: any) => {
-        console.log('participantReady response:', response)
-
-        startSession(quizId, userId)
-    })
-}
-
-export const startSession = (quizId: string, userId: string) => {
-    if (!quizId || !userId) {
-        console.error('Invalid parameters for START_SESSION:', { quizId, userId })
-        return
-    }
-
-    console.log('Calling startSession:', {
-        quizId,
-        userId,
-        socket: getSocket(),
-        socketConnected: getSocket()?.connected,
-        event: EVENTS.START_SESSION,
-    })
-
-    emitEvent(EVENTS.START_SESSION, { quizId, userId }, (response: any) => {
-        console.log('START_SESSION response:', {
-            response,
-            success: response?.success,
-            error: response?.error,
-            session: response?.data?.session,
-        })
-
-        if (response?.error) {
-            console.error('START_SESSION error:', response.error)
+        if (!Object.values(SocketEvent).includes(event as SocketEvent)) {
+            this.socket?.on(event, (...args) => this.handleSocketEvent(event, ...args))
         }
-    })
+    }
+
+    off(event: string, callback?: SocketEventCallback): void {
+        if (callback) {
+            this.eventHandlers.get(event)?.delete(callback)
+        } else {
+            this.eventHandlers.delete(event)
+        }
+
+        if (!this.eventHandlers.has(event) || this.eventHandlers.get(event)?.size === 0) {
+            this.socket?.off(event)
+        }
+    }
+
+    emit(event: string, data: any, callback?: Function): void {
+        if (!this.socket?.connected) {
+            console.warn('Socket not connected, cannot emit:', event)
+            return
+        }
+
+        const emitInfo = {
+            event,
+            data,
+            socketId: this.socket.id,
+            transport: this.socket.io.engine.transport.name,
+            readyState: this.socket.io.engine.readyState,
+            auth: this.socket.auth,
+        }
+        console.log('Emitting event:', emitInfo)
+
+        if (callback) {
+            this.socket.emit(event, data, callback)
+        } else {
+            this.socket.emit(event, data)
+        }
+    }
+
+    disconnect(): void {
+        if (this.socket) {
+            const disconnectInfo = {
+                id: this.socket.id,
+                wasConnected: this.socket.connected,
+            }
+            console.log('Disconnecting socket:', disconnectInfo)
+
+            this.socket.close()
+            this.socket = null
+            this.eventHandlers.clear()
+        }
+    }
+
+    getSocket(): Socket | null {
+        return this.socket
+    }
+
+    getSocketId(): string | null {
+        return this.socket?.id || null
+    }
+
+    isConnected(): boolean {
+        return this.socket?.connected || false
+    }
+
+    joinQuiz(quizId: string, userId: string, username: string): void {
+        this.emit(EVENTS.JOIN_QUIZ, { quizId, userId, username })
+    }
+
+    leaveQuiz(quizId: string, userId: string): void {
+        this.emit(EVENTS.LEAVE_QUIZ, { quizId, userId })
+    }
+
+    participantReady(quizId: string, userId: string): Promise<void> {
+        return new Promise((resolve, reject) => {
+            if (!this.socket?.connected) {
+                reject(new Error('Socket not connected'))
+                return
+            }
+
+            console.log('Emitting participantReady event:', { quizId, userId })
+            this.emit(EVENTS.PARTICIPANT_READY, { quizId, userId }, (response: any) => {
+                if (response?.error) {
+                    reject(new Error(response.error))
+                } else {
+                    this.startSession(quizId, userId)
+                    resolve()
+                }
+            })
+        })
+    }
+
+    startSession(quizId: string, userId: string): Promise<void> {
+        return new Promise((resolve, reject) => {
+            if (!this.socket?.connected) {
+                reject(new Error('Socket not connected'))
+                return
+            }
+
+            if (!quizId || !userId) {
+                reject(new Error('Invalid parameters for START_SESSION'))
+                return
+            }
+
+            console.log('Starting session:', { quizId, userId })
+            this.emit(EVENTS.START_SESSION, { quizId, userId }, (response: any) => {
+                if (response?.error) {
+                    reject(new Error(response.error))
+                } else {
+                    resolve()
+                }
+            })
+        })
+    }
+
+    initializeSocket(): Socket | null {
+        try {
+            if (!this.socket) {
+                this.connect()
+            }
+            return this.getSocket()
+        } catch (error) {
+            console.error('Socket initialization failed:', error)
+            return null
+        }
+    }
 }
 
-export const submitAnswer = (
-    quizId: string,
-    questionId: string,
-    answer: string,
-    timeSpent: number
-) => {
-    emitEvent(EVENTS.SUBMIT_ANSWER, { quizId, questionId, answer, timeSpent })
-}
+export const socketManager = SocketManager.getInstance()
+
+// Export quiz specific methods for backward compatibility
+export const participantReady = (quizId: string, userId: string) =>
+    socketManager.participantReady(quizId, userId)
+
+export const startSession = (quizId: string, userId: string) =>
+    socketManager.startSession(quizId, userId)

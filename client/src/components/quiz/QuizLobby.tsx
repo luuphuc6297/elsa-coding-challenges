@@ -38,8 +38,8 @@ export function QuizLobby({ quizId, onError }: Props) {
         }
 
         console.log('Setting up QuizLobby socket listeners:', {
-            socketId: socket.id,
-            connected: socket.connected,
+            socketId: socket.socketId,
+            connected: socket.isConnected,
             quizId,
             userId: user._id,
         })
@@ -48,7 +48,7 @@ export function QuizLobby({ quizId, onError }: Props) {
             console.log('Received SESSION_EVENT in QuizLobby:', {
                 type: event.type,
                 data: event.data,
-                socketId: socket.id,
+                socketId: socket.socketId,
                 currentParticipants: participants,
             })
 
@@ -83,8 +83,8 @@ export function QuizLobby({ quizId, onError }: Props) {
         const handleError = (error: any) => {
             console.error('Socket error in QuizLobby:', {
                 error,
-                socketId: socket.id,
-                connected: socket.connected,
+                socketId: socket.socketId,
+                connected: socket.isConnected,
             })
             setError(error.message)
             setIsLoading(false)
@@ -98,7 +98,7 @@ export function QuizLobby({ quizId, onError }: Props) {
             quizId,
             userId: user._id,
             username: user.username,
-            socketId: socket.id,
+            socketId: socket.socketId,
         })
         socket.emit('JOIN_QUIZ', {
             quizId,
@@ -108,19 +108,19 @@ export function QuizLobby({ quizId, onError }: Props) {
 
         return () => {
             console.log('Cleaning up QuizLobby socket listeners:', {
-                socketId: socket.id,
-                connected: socket.connected,
+                socketId: socket.socketId,
+                connected: socket.isConnected,
             })
 
             if (socket) {
                 socket.off('SESSION_EVENT', handleSessionEvent)
                 socket.off('error', handleError)
 
-                if (socket.connected) {
+                if (socket.isConnected) {
                     console.log('Leaving quiz lobby:', {
                         quizId,
                         userId: user._id,
-                        socketId: socket.id,
+                        socketId: socket.socketId,
                     })
                     socket.emit('LEAVE_QUIZ', {
                         quizId,
@@ -136,8 +136,8 @@ export function QuizLobby({ quizId, onError }: Props) {
             console.log('Cannot emit ready event: missing dependencies', {
                 hasUser: !!user,
                 hasSocket: !!socket,
-                socketId: socket?.id,
-                connected: socket?.connected,
+                socketId: socket?.socketId,
+                connected: socket?.isConnected,
             })
             return
         }
@@ -146,8 +146,8 @@ export function QuizLobby({ quizId, onError }: Props) {
         console.log('Marking participant as ready:', {
             quizId,
             userId: user._id,
-            socketId: socket.id,
-            connected: socket.connected,
+            socketId: socket.socketId,
+            connected: socket.isConnected,
         })
 
         try {
@@ -164,8 +164,8 @@ export function QuizLobby({ quizId, onError }: Props) {
             console.log('Cannot start session: missing dependencies', {
                 hasUser: !!user,
                 hasSocket: !!socket,
-                socketId: socket?.id,
-                connected: socket?.connected,
+                socketId: socket?.socketId,
+                connected: socket?.isConnected,
                 isHost,
                 sessionStatus,
                 user,
@@ -191,8 +191,8 @@ export function QuizLobby({ quizId, onError }: Props) {
         console.log('Starting quiz session:', {
             quizId,
             userId: user._id,
-            socketId: socket.id,
-            connected: socket.connected,
+            socketId: socket.socketId,
+            connected: socket.isConnected,
             readyParticipants: participants.filter((p) => p.isReady).length,
             totalParticipants: participants.length,
             isHost,
@@ -272,14 +272,22 @@ export function QuizLobby({ quizId, onError }: Props) {
                             disabled={!participants.every((p) => p.isReady) || isLoading}
                             startIcon={isLoading && <CircularProgress size={20} color="inherit" />}
                         >
-                            {isLoading ? 'Starting...' : `Start Quiz (${participants.filter((p) => p.isReady).length}/${participants.length} ready)`}
+                            {isLoading
+                                ? 'Starting...'
+                                : `Start Quiz (${participants.filter((p) => p.isReady).length}/${
+                                      participants.length
+                                  } ready)`}
                         </Button>
                     ) : (
                         <Button
                             variant="contained"
                             color="primary"
                             onClick={handleReady}
-                            disabled={!user || participants.find((p) => p.userId === user._id)?.isReady || isLoading}
+                            disabled={
+                                !user ||
+                                participants.find((p) => p.userId === user._id)?.isReady ||
+                                isLoading
+                            }
                             startIcon={isLoading && <CircularProgress size={20} color="inherit" />}
                         >
                             {isLoading ? 'Marking as Ready...' : 'Ready'}

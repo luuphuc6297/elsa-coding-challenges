@@ -23,12 +23,13 @@ interface Props {
 }
 
 export function QuizPlayer({ quizId, initialQuestionData, onComplete }: Props) {
-    const socket = useSocket()
+    const socketData = useSocket()
     const { user } = useUser()
     const { quizState, updateQuizState, handleTimeUp, handleAnswer, handleNextQuestion } =
-        useQuizState(quizId, initialQuestionData, socket, user)
+        useQuizState(quizId, initialQuestionData, socketData.socket, user)
 
     useEffect(() => {
+        const socket = socketData.socket
         if (!socket) return
 
         const handleQuestionStarted = (data: QuestionStartedEvent) => {
@@ -107,7 +108,7 @@ export function QuizPlayer({ quizId, initialQuestionData, onComplete }: Props) {
             socket.off(EVENTS.SCORE_UPDATE, handleScoreUpdate)
         }
     }, [
-        socket,
+        socketData.socket,
         updateQuizState,
         quizState.currentQuestionIndex,
         quizState.selectedAnswer,
