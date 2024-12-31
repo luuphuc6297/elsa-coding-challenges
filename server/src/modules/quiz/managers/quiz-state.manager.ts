@@ -34,7 +34,7 @@ export class QuizStateManager {
             endTime: session.endTime ? new Date(session.endTime) : undefined,
             currentQuestionIndex: 0,
             participants: Array.from(session.participants.values()),
-            submittedAnswers: new Map()
+            submittedAnswers: new Map(),
         }
     }
 

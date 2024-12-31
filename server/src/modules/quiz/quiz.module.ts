@@ -9,12 +9,12 @@ import { RedisService } from 'shared/services/redis.service'
 import { QuizController } from './controllers/quiz.controller'
 import { QuizSession, QuizSessionSchema } from './entities/quiz-session.entity'
 import { Quiz, QuizSchema } from './entities/quiz.entity'
+import { QuizStateManager } from './managers/quiz-state.manager'
 import { QuizGateway } from './quiz.gateway'
 import { QuestionService } from './services/question.service'
+import { QuizEventHandlerService } from './services/quiz-event-handler.service'
 import { QuizSessionService } from './services/quiz-session.service'
 import { QuizService } from './services/quiz.service'
-import { QuizStateManager } from './services/quiz-state.manager'
-import { QuizEventHandlerService } from './services/quiz-event-handler.service'
 
 class RedisIoAdapter extends IoAdapter {
     private adapterConstructor: ReturnType<typeof createAdapter>
