@@ -3,8 +3,8 @@ import { EVENTS } from 'shared/constants'
 import { MetricsService } from 'shared/services/metrics.service'
 import { Socket } from 'socket.io'
 import { IQuestionStartedEventData, IQuizSession } from '../interfaces/quiz.interface'
-import { QuizSessionService } from '../services/quiz-session.service'
 import { QuizStateManager } from '../managers/quiz-state.manager'
+import { QuizSessionService } from '../services/quiz-session.service'
 import { QuizService } from '../services/quiz.service'
 
 // Command Interface

@@ -3,24 +3,114 @@ import { InjectModel } from '@nestjs/mongoose'
 import { Model, Types } from 'mongoose'
 import { CACHE_KEYS, EVENTS, QUIZ_STATUS } from 'shared/constants'
 import { RedisService } from 'shared/services/redis.service'
-import { QuizSession } from '../entities/quiz-session.entity'
-import { IQuizSessionService } from '../interfaces/quiz.interface'
 import { v4 as uuidv4 } from 'uuid'
+import { QuizSession } from '../entities/quiz-session.entity'
+import { IQuizSession, ParticipantStatus, QuizSessionStatus } from '../interfaces/quiz.interface'
 
 @Injectable()
-export class QuizSessionService implements IQuizSessionService {
+export class QuizSessionService {
     constructor(
-        @InjectModel(QuizSession.name) private quizSessionModel: Model<QuizSession>,
+        @InjectModel(QuizSession.name) private readonly sessionModel: Model<QuizSession>,
         private readonly redisService: RedisService
     ) {}
 
-    async findActiveSession(quizId: string): Promise<QuizSession> {
-        return await this.quizSessionModel
-            .findOne({
+    async validateSession(quizId: string): Promise<IQuizSession> {
+        const session = await this.findActiveSession(quizId)
+        if (!session) {
+            throw new Error('No active session found')
+        }
+        if (session.status !== QuizSessionStatus.ACTIVE) {
+            throw new Error('Session is not active')
+        }
+        return session
+    }
+
+    async findActiveSession(quizId: string): Promise<QuizSession | null> {
+        return this.sessionModel.findOne({
+            quizId,
+            status: { $in: [QuizSessionStatus.WAITING, QuizSessionStatus.ACTIVE] },
+            endTime: { $exists: false },
+        })
+    }
+
+    async createSession(quizId: string): Promise<IQuizSession> {
+        const session = new this.sessionModel({
+            quizId,
+            status: QuizSessionStatus.WAITING,
+            startTime: new Date(),
+            participants: [],
+            currentQuestionIndex: 0,
+        })
+        return session.save()
+    }
+
+    async endSession(quizId: string): Promise<void> {
+        await this.sessionModel.findOneAndUpdate(
+            { quizId, status: QuizSessionStatus.ACTIVE },
+            {
+                $set: {
+                    status: QuizSessionStatus.COMPLETED,
+                    endTime: new Date(),
+                },
+            }
+        )
+    }
+
+    async updateSessionStatus(quizId: string, status: QuizSessionStatus): Promise<void> {
+        await this.sessionModel.findOneAndUpdate({ quizId }, { $set: { status } })
+    }
+
+    async incrementQuestionIndex(quizId: string): Promise<void> {
+        await this.sessionModel.findOneAndUpdate({ quizId }, { $inc: { currentQuestionIndex: 1 } })
+    }
+
+    async addParticipant(
+        quizId: string,
+        participant: {
+            userId: string
+            username: string
+            score: number
+            correctAnswers: number
+            timeSpent: number
+        }
+    ): Promise<void> {
+        await this.sessionModel.findOneAndUpdate(
+            { quizId },
+            {
+                $addToSet: {
+                    participants: {
+                        ...participant,
+                        joinedAt: new Date(),
+                        isActive: true,
+                        hasCompleted: false,
+                    },
+                },
+            }
+        )
+    }
+
+    async updateParticipantScore(
+        quizId: string,
+        userId: string,
+        update: {
+            score: number
+            correctAnswers: number
+            timeSpent: number
+        }
+    ): Promise<void> {
+        await this.sessionModel.findOneAndUpdate(
+            {
                 quizId,
-                status: { $in: [QUIZ_STATUS.WAITING, QUIZ_STATUS.ACTIVE] },
-            })
-            .exec()
+                'participants.userId': userId,
+            },
+            {
+                $set: {
+                    'participants.$.score': update.score,
+                    'participants.$.correctAnswers': update.correctAnswers,
+                    'participants.$.timeSpent': update.timeSpent,
+                },
+            }
+        )
     }
 
     async joinQuizSession(quizId: string, userId: string): Promise<QuizSession> {
@@ -34,13 +124,18 @@ export class QuizSessionService implements IQuizSessionService {
             if (!existingParticipant) {
                 session.participants.push({
                     userId: new Types.ObjectId(userId),
-                    isReady: false,
+                    username: '',
+                    status: ParticipantStatus.ONLINE,
                     score: 0,
+                    correctAnswers: 0,
+                    timeSpent: 0,
+                    lastActive: Date.now(),
                     answers: [],
                     joinedAt: new Date(),
                     hasCompleted: false,
                     isActive: true,
-                    readyAt: null,
+                    isReady: true,
+                    readyAt: new Date(),
                 })
                 await session.save()
             } else {
@@ -61,14 +156,14 @@ export class QuizSessionService implements IQuizSessionService {
     async setParticipantReady(quizId: string, userId: string): Promise<QuizSession> {
         console.log('Setting participant ready:', { quizId, userId })
 
-        let session = await this.quizSessionModel.findOne({
+        let session = await this.sessionModel.findOne({
             quizId,
             status: QUIZ_STATUS.WAITING,
         })
 
         if (!session) {
             console.log('No waiting session found, creating new session')
-            session = new this.quizSessionModel({
+            session = new this.sessionModel({
                 quizId,
                 sessionId: uuidv4(),
                 participants: [
@@ -117,7 +212,12 @@ export class QuizSessionService implements IQuizSessionService {
         if (!participant) {
             session.participants.push({
                 userId: new Types.ObjectId(userId),
+                username: '',
+                status: ParticipantStatus.ONLINE,
                 score: 0,
+                correctAnswers: 0,
+                timeSpent: 0,
+                lastActive: Date.now(),
                 answers: [],
                 joinedAt: new Date(),
                 hasCompleted: false,
@@ -161,7 +261,7 @@ export class QuizSessionService implements IQuizSessionService {
             throw new Error('User is not a participant in this session')
         }
 
-        session.status = QUIZ_STATUS.ACTIVE
+        session.status = QuizSessionStatus.ACTIVE
         session.startTime = new Date()
         await session.save()
 
@@ -181,7 +281,7 @@ export class QuizSessionService implements IQuizSessionService {
         points: number
         totalScore: number
     }> {
-        const session = await this.quizSessionModel.findOne({
+        const session = await this.sessionModel.findOne({
             sessionId,
             status: QUIZ_STATUS.ACTIVE,
         })
@@ -224,7 +324,7 @@ export class QuizSessionService implements IQuizSessionService {
     }
 
     async endQuizSession(quizId: string): Promise<QuizSession> {
-        const session = await this.quizSessionModel.findOne({
+        const session = await this.sessionModel.findOne({
             quizId,
             status: QUIZ_STATUS.ACTIVE,
         })
@@ -233,7 +333,7 @@ export class QuizSessionService implements IQuizSessionService {
             throw new NotFoundException('Active quiz session not found')
         }
 
-        session.status = QUIZ_STATUS.COMPLETED
+        session.status = QuizSessionStatus.COMPLETED
         session.endTime = new Date()
         session.events.push({
             type: 'SESSION_ENDED',
@@ -257,7 +357,7 @@ export class QuizSessionService implements IQuizSessionService {
         duration: number | null
         completionRate: number
     }> {
-        const session = await this.quizSessionModel.findOne({ sessionId })
+        const session = await this.sessionModel.findOne({ sessionId })
         if (!session) {
             throw new NotFoundException('Session not found')
         }

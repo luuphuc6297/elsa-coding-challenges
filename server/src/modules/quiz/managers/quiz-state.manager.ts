@@ -1,144 +1,186 @@
 import { Injectable } from '@nestjs/common'
-
-export interface QuizState {
-    currentQuestionIndex: number
-    timer: NodeJS.Timeout
-    startTime?: number
-    questionStartTime?: number
-    participants: Set<string>
-    submittedAnswers: Set<string>
-}
+import { Types } from 'mongoose'
+import {
+    IParticipant,
+    IQuestionState,
+    IQuizSession,
+    ParticipantStatus,
+    QuizSessionStatus,
+} from '../interfaces/quiz.interface'
 
 @Injectable()
 export class QuizStateManager {
-    private states: Map<string, QuizState> = new Map()
+    private sessions: Map<
+        string,
+        {
+            status: QuizSessionStatus
+            participants: Map<string, IParticipant>
+            currentQuestion: IQuestionState | null
+            questionTimer: NodeJS.Timeout | null
+            startTime: number
+            endTime?: number
+        }
+    > = new Map()
+
+    getState(quizId: string): IQuizSession | undefined {
+        const session = this.sessions.get(quizId)
+        if (!session) return undefined
+
+        return {
+            quizId,
+            sessionId: quizId,
+            status: QuizSessionStatus.WAITING,
+            startTime: new Date(session.startTime),
+            endTime: session.endTime ? new Date(session.endTime) : undefined,
+            currentQuestionIndex: 0,
+            participants: Array.from(session.participants.values()),
+            submittedAnswers: new Map()
+        }
+    }
+
+    createSession(quizId: string): void {
+        this.sessions.set(quizId, {
+            status: QuizSessionStatus.WAITING,
+            participants: new Map(),
+            currentQuestion: null,
+            questionTimer: null,
+            startTime: Date.now(),
+        })
+    }
+
+    addParticipant(quizId: string, participant: IParticipant): void {
+        const session = this.sessions.get(quizId)
+        if (!session) {
+            throw new Error('Session not found')
+        }
+        session.participants.set(participant.userId.toString(), participant)
+    }
+
+    startQuestion(quizId: string, questionId: string, timeLimit: number): void {
+        const session = this.sessions.get(quizId)
+        if (!session) {
+            throw new Error('Session not found')
+        }
+
+        session.currentQuestion = {
+            questionId,
+            startTime: Date.now(),
+            submittedAnswers: new Map(),
+            timeLimit,
+        }
+
+        // Clear existing timer if any
+        if (session.questionTimer) {
+            clearTimeout(session.questionTimer)
+        }
+    }
+
+    submitAnswer(quizId: string, userId: string, answer: string, points: number): void {
+        const session = this.sessions.get(quizId)
+        if (!session || !session.currentQuestion) {
+            throw new Error('Invalid session state')
+        }
+
+        const timeSpent = Date.now() - session.currentQuestion.startTime
+        session.currentQuestion.submittedAnswers.set(userId, {
+            answer,
+            timeSpent,
+            points,
+        })
+
+        // Update participant score
+        const participant = session.participants.get(userId)
+        if (participant) {
+            participant.score += points
+            if (points > 0) {
+                participant.correctAnswers += 1
+            }
+            participant.timeSpent += timeSpent
+            participant.lastActive = Date.now()
+        }
+    }
+
+    getParticipantScore(quizId: string, userId: string | Types.ObjectId): number {
+        const session = this.sessions.get(quizId)
+        if (!session) {
+            throw new Error('Session not found')
+        }
+        const userIdStr = typeof userId === 'string' ? userId : userId.toString()
+        return session.participants.get(userIdStr)?.score || 0
+    }
+
+    updateParticipantStatus(
+        quizId: string,
+        userId: string | Types.ObjectId,
+        status: ParticipantStatus
+    ): void {
+        const session = this.sessions.get(quizId)
+        if (!session) {
+            throw new Error('Session not found')
+        }
+        const userIdStr = typeof userId === 'string' ? userId : userId.toString()
+        const participant = session.participants.get(userIdStr)
+        if (participant) {
+            participant.status = status
+            participant.lastActive = Date.now()
+        }
+    }
+
+    getLeaderboard(quizId: string): IParticipant[] {
+        const session = this.sessions.get(quizId)
+        if (!session) {
+            throw new Error('Session not found')
+        }
+
+        return Array.from(session.participants.values()).sort((a, b) => b.score - a.score)
+    }
 
     getAllParticipantIds(quizId: string): string[] {
-        const state = this.getState(quizId)
-        return state ? Array.from(state.participants) : []
+        const session = this.sessions.get(quizId)
+        if (!session) {
+            throw new Error('Session not found')
+        }
+        return Array.from(session.participants.keys())
     }
 
     haveAllParticipantsAnswered(quizId: string): boolean {
-        const state = this.getState(quizId)
-        if (!state) return false
-        return (
-            state.participants.size > 0 && state.submittedAnswers.size === state.participants.size
+        const session = this.sessions.get(quizId)
+        if (!session || !session.currentQuestion) {
+            return false
+        }
+
+        const activeParticipants = Array.from(session.participants.values()).filter(
+            (p) => p.status === ParticipantStatus.TAKING
+        )
+
+        return activeParticipants.every((p) =>
+            session.currentQuestion?.submittedAnswers.has(p.userId.toString())
         )
     }
 
-    createState(quizId: string): QuizState {
-        const state: QuizState = {
-            currentQuestionIndex: 0,
-            timer: null,
-            startTime: Date.now(),
-            questionStartTime: null,
-            participants: new Set<string>(),
-            submittedAnswers: new Set<string>(),
+    hasSubmittedAnswer(quizId: string, userId: string | Types.ObjectId): boolean {
+        const session = this.sessions.get(quizId)
+        if (!session || !session.currentQuestion) {
+            return false
         }
-        this.states.set(quizId, state)
-        return state
+        const userIdStr = typeof userId === 'string' ? userId : userId.toString()
+        return session.currentQuestion.submittedAnswers.has(userIdStr)
     }
 
-    getState(quizId: string): QuizState | undefined {
-        return this.states.get(quizId)
-    }
-
-    getOrCreateState(quizId: string): QuizState {
-        let state = this.getState(quizId)
-        if (!state) {
-            state = this.createState(quizId)
-        }
-        return state
-    }
-
-    updateState(quizId: string, updates: Partial<QuizState>): void {
-        const state = this.getOrCreateState(quizId)
-        Object.assign(state, updates)
-        this.states.set(quizId, state)
-    }
-
-    deleteState(quizId: string): void {
-        this.states.delete(quizId)
-    }
-
-    clearTimer(quizId: string): void {
-        const state = this.getState(quizId)
-        if (state?.timer) {
-            clearTimeout(state.timer)
-            state.timer = null
-            this.states.set(quizId, state)
+    clearQuestionTimer(quizId: string): void {
+        const session = this.sessions.get(quizId)
+        if (session?.questionTimer) {
+            clearTimeout(session.questionTimer)
+            session.questionTimer = null
         }
     }
 
-    setTimer(quizId: string, timer: NodeJS.Timeout): void {
-        const state = this.getOrCreateState(quizId)
-        this.clearTimer(quizId)
-        state.timer = timer
-        this.states.set(quizId, state)
-    }
-
-    addParticipant(quizId: string, participantId: string): void {
-        const state = this.getOrCreateState(quizId)
-        state.participants.add(participantId)
-        this.states.set(quizId, state)
-    }
-
-    removeParticipant(quizId: string, participantId: string): void {
-        const state = this.getState(quizId)
-        if (state) {
-            state.participants.delete(participantId)
-            this.states.set(quizId, state)
+    endSession(quizId: string): void {
+        const session = this.sessions.get(quizId)
+        if (session) {
+            this.clearQuestionTimer(quizId)
+            session.status = QuizSessionStatus.COMPLETED
+            session.endTime = Date.now()
         }
-    }
-
-    addSubmittedAnswer(quizId: string, participantId: string): void {
-        const state = this.getOrCreateState(quizId)
-        state.submittedAnswers.add(participantId)
-        this.states.set(quizId, state)
-    }
-
-    hasSubmittedAnswer(quizId: string, participantId: string): boolean {
-        const state = this.getState(quizId)
-        return state ? state.submittedAnswers.has(participantId) : false
-    }
-
-    clearSubmittedAnswers(quizId: string): void {
-        const state = this.getState(quizId)
-        if (state) {
-            state.submittedAnswers.clear()
-            this.states.set(quizId, state)
-        }
-    }
-
-    getAllParticipants(quizId: string): Set<string> {
-        const state = this.getState(quizId)
-        return state ? state.participants : new Set()
-    }
-
-    getSubmittedAnswersCount(quizId: string): number {
-        const state = this.getState(quizId)
-        return state ? state.submittedAnswers.size : 0
-    }
-
-    getCurrentQuestionIndex(quizId: string): number {
-        const state = this.getState(quizId)
-        return state ? state.currentQuestionIndex : -1
-    }
-
-    incrementQuestionIndex(quizId: string): void {
-        const state = this.getOrCreateState(quizId)
-        state.currentQuestionIndex++
-        this.states.set(quizId, state)
-    }
-
-    setQuestionStartTime(quizId: string, time?: number): void {
-        const state = this.getOrCreateState(quizId)
-        state.questionStartTime = time || Date.now()
-        this.states.set(quizId, state)
-    }
-
-    getQuestionStartTime(quizId: string): number | undefined {
-        const state = this.getState(quizId)
-        return state?.questionStartTime
     }
 }

@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose'
 import { Document, Types } from 'mongoose'
+import { ParticipantStatus, QuizSessionStatus } from '../interfaces/quiz.interface'
 
 @Schema()
 class Answer {
@@ -24,8 +25,27 @@ class Participant {
     @Prop({ type: Types.ObjectId, ref: 'User', required: true })
     userId: Types.ObjectId
 
+    @Prop({ required: true })
+    username: string
+
+    @Prop({
+        type: String,
+        enum: Object.values(ParticipantStatus),
+        default: ParticipantStatus.ONLINE,
+    })
+    status: ParticipantStatus
+
     @Prop({ default: 0 })
     score: number
+
+    @Prop({ default: 0 })
+    correctAnswers: number
+
+    @Prop({ default: 0 })
+    timeSpent: number
+
+    @Prop({ default: Date.now })
+    lastActive: number
 
     @Prop({ type: [Answer], default: [] })
     answers: Answer[]
@@ -42,7 +62,7 @@ class Participant {
     @Prop({ type: Boolean, default: false })
     isReady: boolean
 
-    @Prop({ type: Date })
+    @Prop({ type: Date, default: null })
     readyAt: Date
 }
 
@@ -71,15 +91,15 @@ export class QuizSession extends Document {
 
     @Prop({
         type: String,
-        enum: ['waiting', 'active', 'completed', 'cancelled'],
-        default: 'waiting',
+        enum: Object.values(QuizSessionStatus),
+        default: QuizSessionStatus.WAITING,
     })
-    status: string
+    status: QuizSessionStatus
 
     @Prop({ required: true })
     startTime: Date
 
-    @Prop()
+    @Prop({ type: Date })
     endTime: Date
 
     @Prop({ type: SessionSettings, default: () => ({}) })
@@ -105,6 +125,15 @@ export class QuizSession extends Document {
         timestamp: Date
         data: any
     }>
+
+    @Prop({ required: true, default: 0 })
+    currentQuestionIndex: number
+
+    @Prop({ type: Map })
+    submittedAnswers: Map<string, { answer: string; timeSpent: number; points: number }>
+
+    @Prop({ default: Date.now })
+    createdAt: Date
 }
 
 export const QuizSessionSchema = SchemaFactory.createForClass(QuizSession)

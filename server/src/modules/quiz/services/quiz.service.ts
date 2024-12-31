@@ -1,82 +1,53 @@
-import { Injectable, NotFoundException } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { Model } from 'mongoose'
-import { v4 as uuidv4 } from 'uuid'
-import { CreateQuizDto } from '../dtos/create-quiz.dto'
 import { Quiz } from '../entities/quiz.entity'
-import { IQuizService } from '../interfaces/quiz.interface'
+import { IQuizSession } from '../interfaces/quiz.interface'
 
 @Injectable()
-export class QuizService implements IQuizService {
-    constructor(@InjectModel(Quiz.name) private quizModel: Model<Quiz>) {}
+export class QuizService {
+    constructor(@InjectModel(Quiz.name) private readonly quizModel: Model<Quiz>) {}
 
-    async createQuiz(createQuizDto: CreateQuizDto): Promise<Quiz> {
-        const quiz = new this.quizModel({
-            ...createQuizDto,
-            quizId: uuidv4(),
-        })
-        return await quiz.save()
-    }
-
-    async findAll(): Promise<Quiz[]> {
-        return await this.quizModel.find().exec()
-    }
-
-    async findById(id: string): Promise<Quiz> {
-        const quiz = await this.quizModel.findOne({ quizId: id }).exec()
+    async getQuestionById(questionId: string): Promise<any> {
+        const quiz = await this.quizModel.findOne({ 'questions._id': questionId })
         if (!quiz) {
-            throw new NotFoundException('Quiz not found')
+            throw new Error('Question not found')
         }
-        return quiz
+        return quiz.questions.find((q) => q.questionId === questionId)
     }
 
-    async updateQuiz(id: string, updateData: Partial<Quiz>): Promise<Quiz> {
-        const quiz = await this.quizModel
-            .findOneAndUpdate({ quizId: id }, { $set: updateData }, { new: true })
-            .exec()
-
+    async getCurrentQuestion(session: IQuizSession): Promise<any> {
+        const quiz = await this.quizModel.findById(session.quizId)
         if (!quiz) {
-            throw new NotFoundException('Quiz not found')
+            throw new Error('Quiz not found')
         }
-
-        return quiz
+        return quiz.questions[session.currentQuestionIndex]
     }
 
-    async deleteQuiz(id: string): Promise<void> {
-        const result = await this.quizModel.deleteOne({ quizId: id })
-        if (result.deletedCount === 0) {
-            throw new NotFoundException('Quiz not found')
-        }
-    }
-
-    async addQuestion(quizId: string, question: any): Promise<Quiz> {
-        const quiz = await this.findById(quizId)
-        quiz.questions.push({
-            ...question,
-            questionId: uuidv4(),
-        })
-        return await quiz.save()
-    }
-
-    async removeQuestion(quizId: string, questionId: string): Promise<Quiz> {
-        const quiz = await this.findById(quizId)
-        quiz.questions = quiz.questions.filter((q) => q.questionId !== questionId)
-        return await quiz.save()
-    }
-
-    async updateQuestion(quizId: string, questionId: string, updateData: any): Promise<Quiz> {
-        const quiz = await this.findById(quizId)
-        const questionIndex = quiz.questions.findIndex((q) => q.questionId === questionId)
-
-        if (questionIndex === -1) {
-            throw new NotFoundException('Question not found')
+    async getNextQuestion(session: IQuizSession): Promise<any> {
+        const quiz = await this.quizModel.findById(session.quizId)
+        if (!quiz) {
+            throw new Error('Quiz not found')
         }
 
-        quiz.questions[questionIndex] = {
-            ...quiz.questions[questionIndex],
-            ...updateData,
+        const nextIndex = session.currentQuestionIndex + 1
+        if (nextIndex >= quiz.questions.length) {
+            return null
         }
 
-        return await quiz.save()
+        return quiz.questions[nextIndex]
+    }
+
+    async validateQuizAccess(quizId: string, userId: string): Promise<boolean> {
+        const quiz = await this.quizModel.findById(quizId)
+        if (!quiz) {
+            return false
+        }
+        // Check if quiz is public or user is the creator
+        return quiz.isPublic || quiz.createdBy.toString() === userId
+    }
+
+    async findById(id: string): Promise<Quiz | null> {
+        return this.quizModel.findById(id)
     }
 }

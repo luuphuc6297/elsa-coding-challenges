@@ -89,6 +89,12 @@ export class Quiz extends Document {
 
     @Prop({ default: Date.now })
     updatedAt: Date
+
+    @Prop({ type: Boolean, default: false })
+    isPublic: boolean
+
+    @Prop({ required: true })
+    createdBy: string
 }
 
 export const QuizSchema = SchemaFactory.createForClass(Quiz)

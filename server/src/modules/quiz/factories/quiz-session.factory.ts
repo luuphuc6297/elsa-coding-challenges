@@ -1,125 +1,113 @@
 import { Types } from 'mongoose'
-import { EVENTS, QUIZ_STATUS } from 'shared/constants'
 import { v4 as uuidv4 } from 'uuid'
 import { QuizSession } from '../entities/quiz-session.entity'
+import { ParticipantStatus, QuizSessionStatus } from '../interfaces/quiz.interface'
 
 export interface IQuizSessionFactory {
-    createSession(quizId: string, userId: string): QuizSession
+    createSession(quizId: string, userId: Types.ObjectId, username: string): Partial<QuizSession>
 }
 
 export class DefaultQuizSessionFactory implements IQuizSessionFactory {
-    createSession(quizId: string, userId: string): QuizSession {
+    createSession(quizId: string, userId: Types.ObjectId, username: string): Partial<QuizSession> {
         return {
             quizId,
             sessionId: uuidv4(),
+            status: QuizSessionStatus.WAITING,
+            startTime: new Date(),
+            currentQuestionIndex: 0,
             participants: [
                 {
-                    userId: new Types.ObjectId(userId),
+                    userId,
+                    username,
+                    status: ParticipantStatus.ONLINE,
                     score: 0,
+                    correctAnswers: 0,
+                    timeSpent: 0,
+                    lastActive: Date.now(),
                     answers: [],
                     joinedAt: new Date(),
                     hasCompleted: false,
                     isActive: true,
-                    isReady: true,
-                    readyAt: new Date(),
+                    isReady: false,
+                    readyAt: null,
                 },
             ],
-            status: QUIZ_STATUS.WAITING,
-            startTime: new Date(),
-            settings: {
-                shuffleQuestions: true,
-                shuffleOptions: true,
-                showResults: true,
-            },
-            events: [
-                {
-                    type: EVENTS.PARTICIPANT_READY,
-                    timestamp: new Date(),
-                    data: {
-                        userId,
-                        participantCount: 1,
-                        readyCount: 1,
-                    },
-                },
-            ],
-        } as QuizSession
-    }
-}
-
-export class CompetitiveQuizSessionFactory implements IQuizSessionFactory {
-    createSession(quizId: string, userId: string): QuizSession {
-        return {
-            quizId,
-            sessionId: uuidv4(),
-            participants: [
-                {
-                    userId: new Types.ObjectId(userId),
-                    score: 0,
-                    answers: [],
-                    joinedAt: new Date(),
-                    hasCompleted: false,
-                    isActive: true,
-                    isReady: true,
-                    readyAt: new Date(),
-                },
-            ],
-            status: QUIZ_STATUS.WAITING,
-            startTime: new Date(),
-            settings: {
-                shuffleQuestions: true,
-                shuffleOptions: true,
-                showResults: false, // Hide results until end in competitive mode
-            },
-            events: [
-                {
-                    type: EVENTS.PARTICIPANT_READY,
-                    timestamp: new Date(),
-                    data: {
-                        userId,
-                        participantCount: 1,
-                        readyCount: 1,
-                    },
-                },
-            ],
-        } as QuizSession
-    }
-}
-
-export class PracticeQuizSessionFactory implements IQuizSessionFactory {
-    createSession(quizId: string, userId: string): QuizSession {
-        return {
-            quizId,
-            sessionId: uuidv4(),
-            participants: [
-                {
-                    userId: new Types.ObjectId(userId),
-                    score: 0,
-                    answers: [],
-                    joinedAt: new Date(),
-                    hasCompleted: false,
-                    isActive: true,
-                    isReady: true,
-                    readyAt: new Date(),
-                },
-            ],
-            status: QUIZ_STATUS.WAITING,
-            startTime: new Date(),
             settings: {
                 shuffleQuestions: false,
                 shuffleOptions: false,
                 showResults: true,
             },
-            events: [
+            events: [],
+        }
+    }
+}
+
+export class CompetitiveQuizSessionFactory implements IQuizSessionFactory {
+    createSession(quizId: string, userId: Types.ObjectId, username: string): Partial<QuizSession> {
+        return {
+            quizId,
+            sessionId: uuidv4(),
+            status: QuizSessionStatus.WAITING,
+            startTime: new Date(),
+            currentQuestionIndex: 0,
+            participants: [
                 {
-                    type: EVENTS.PARTICIPANT_READY,
-                    timestamp: new Date(),
-                    data: {
-                        userId,
-                        participantCount: 1,
-                        readyCount: 1,
-                    },
+                    userId,
+                    username,
+                    status: ParticipantStatus.ONLINE,
+                    score: 0,
+                    correctAnswers: 0,
+                    timeSpent: 0,
+                    lastActive: Date.now(),
+                    answers: [],
+                    joinedAt: new Date(),
+                    hasCompleted: false,
+                    isActive: true,
+                    isReady: false,
+                    readyAt: null,
                 },
             ],
-        } as QuizSession
+            settings: {
+                shuffleQuestions: true,
+                shuffleOptions: true,
+                showResults: false,
+            },
+            events: [],
+        }
+    }
+}
+
+export class PracticeQuizSessionFactory implements IQuizSessionFactory {
+    createSession(quizId: string, userId: Types.ObjectId, username: string): Partial<QuizSession> {
+        return {
+            quizId,
+            sessionId: uuidv4(),
+            status: QuizSessionStatus.WAITING,
+            startTime: new Date(),
+            currentQuestionIndex: 0,
+            participants: [
+                {
+                    userId,
+                    username,
+                    status: ParticipantStatus.ONLINE,
+                    score: 0,
+                    correctAnswers: 0,
+                    timeSpent: 0,
+                    lastActive: Date.now(),
+                    answers: [],
+                    joinedAt: new Date(),
+                    hasCompleted: false,
+                    isActive: true,
+                    isReady: false,
+                    readyAt: null,
+                },
+            ],
+            settings: {
+                shuffleQuestions: false,
+                shuffleOptions: false,
+                showResults: true,
+            },
+            events: [],
+        }
     }
 }

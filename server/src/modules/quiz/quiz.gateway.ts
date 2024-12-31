@@ -12,7 +12,7 @@ import { createAdapter } from '@socket.io/redis-adapter'
 import { WsRateLimitGuard } from 'common/guards/ws-rate-limit.guard'
 import { WsValidationPipe } from 'common/pipes/validation.pipe'
 import { LeaderboardService } from 'modules/leaderboard/services/leaderboard.service'
-import { EVENTS } from 'shared/constants'
+import { EVENTS, QUIZ_CONSTANTS } from 'shared/constants'
 import { MetricsService } from 'shared/services/metrics.service'
 import { RedisService } from 'shared/services/redis.service'
 import { ResponseType, ResponseUtil } from 'shared/utils/response.util'
@@ -31,7 +31,12 @@ import {
     IQuizSessionFactory,
     PracticeQuizSessionFactory,
 } from './factories/quiz-session.factory'
-import { IQuizStartResult } from './interfaces/quiz.interface'
+import {
+    IQuestionResult,
+    IQuizStartResult,
+    ISubmitAnswerPayload,
+    ParticipantStatus,
+} from './interfaces/quiz.interface'
 import { QuizStateManager } from './managers/quiz-state.manager'
 import {
     LeaderboardObserver,
@@ -41,12 +46,7 @@ import {
 import { QuestionService } from './services/question.service'
 import { QuizSessionService } from './services/quiz-session.service'
 import { QuizService } from './services/quiz.service'
-import {
-    BasicScoringStrategy,
-    IScoringStrategy,
-    ProgressiveScoringStrategy,
-    TimeBasedScoringStrategy,
-} from './strategies/scoring.strategy'
+import { IScoringStrategy, TimeBasedScoringStrategy } from './strategies/scoring.strategy'
 
 @WebSocketGateway({
     namespace: '/quiz',
@@ -78,7 +78,7 @@ export class QuizGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     > = new Map()
 
     private quizEventSubject: QuizEventSubject
-    private scoringStrategies: Map<string, IScoringStrategy>
+    private scoringStrategy: IScoringStrategy
     private sessionFactories: Map<string, IQuizSessionFactory>
     private socketAdapter: ISocketCommunication
     private quizStateManager: QuizStateManager
@@ -104,11 +104,8 @@ export class QuizGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         this.quizEventSubject.addObserver(new LeaderboardObserver(this.leaderboardService))
         this.quizEventSubject.addObserver(new RedisObserver(this.redisService))
 
-        // Initialize scoring strategies
-        this.scoringStrategies = new Map()
-        this.scoringStrategies.set('default', new TimeBasedScoringStrategy())
-        this.scoringStrategies.set('progressive', new ProgressiveScoringStrategy())
-        this.scoringStrategies.set('basic', new BasicScoringStrategy())
+        // Initialize scoring strategy
+        this.scoringStrategy = new TimeBasedScoringStrategy()
 
         // Initialize session factories
         this.sessionFactories = new Map()
@@ -246,6 +243,156 @@ export class QuizGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
             return ResponseUtil.success<IQuizStartResult>(result)
         } catch (error) {
             return ResponseUtil.error<IQuizStartResult>(error.message)
+        }
+    }
+
+    @SubscribeMessage(EVENTS.SUBMIT_ANSWER)
+    @UseGuards(WsRateLimitGuard)
+    async handleSubmitAnswer(
+        client: Socket,
+        payload: ISubmitAnswerPayload
+    ): Promise<ResponseType<IQuestionResult>> {
+        try {
+            const { quizId, questionId, answer, userId } = payload
+
+            // Validate quiz session
+            const session = await this.quizSessionService.validateSession(quizId)
+            const question = await this.quizService.getQuestionById(questionId)
+
+            // Calculate time spent and points
+            const timeSpent = Date.now() - session.startTime.getTime()
+            const points = this.scoringStrategy.calculatePoints(
+                timeSpent,
+                QUIZ_CONSTANTS.QUESTION_TIME_LIMIT,
+                QUIZ_CONSTANTS.BASE_POINTS
+            )
+
+            // Record answer and update score
+            this.quizStateManager.submitAnswer(quizId, userId, answer, points)
+
+            // Get updated participant data
+            const totalScore = this.quizStateManager.getParticipantScore(quizId, userId)
+            const leaderboard = this.quizStateManager.getLeaderboard(quizId)
+
+            // Emit leaderboard update to all participants
+            this.server.to(quizId).emit(EVENTS.LEADERBOARD_UPDATE, leaderboard)
+
+            // Check if all participants have answered
+            if (this.quizStateManager.haveAllParticipantsAnswered(quizId)) {
+                await this.handleNextQuestion(quizId)
+            }
+
+            return ResponseUtil.success({
+                isCorrect: answer === question.correctAnswer,
+                points,
+                correctAnswer: question.correctAnswer,
+                timeSpent,
+                totalScore,
+                correctAnswers:
+                    leaderboard.find((p) => p.userId.toString() === userId)?.correctAnswers || 0,
+            })
+        } catch (error) {
+            return ResponseUtil.error(error.message)
+        }
+    }
+
+    @SubscribeMessage(EVENTS.RECONNECT_SESSION)
+    async handleReconnect(
+        client: Socket,
+        payload: { quizId: string; userId: string }
+    ): Promise<ResponseType<any>> {
+        try {
+            const { quizId, userId } = payload
+            const session = await this.quizSessionService.findActiveSession(quizId)
+
+            if (!session) {
+                throw new Error('Session expired or not found')
+            }
+
+            // Update participant status
+            this.quizStateManager.updateParticipantStatus(quizId, userId, ParticipantStatus.TAKING)
+
+            // Join socket room
+            client.join(quizId)
+
+            // Get current game state
+            const currentQuestion = await this.quizService.getCurrentQuestion(session)
+            const leaderboard = this.quizStateManager.getLeaderboard(quizId)
+
+            return ResponseUtil.success({
+                session,
+                currentQuestion,
+                leaderboard,
+            })
+        } catch (error) {
+            return ResponseUtil.error(error.message)
+        }
+    }
+
+    private async handleNextQuestion(quizId: string): Promise<void> {
+        try {
+            const session = await this.quizSessionService.findActiveSession(quizId)
+            if (!session) return
+
+            const nextQuestion = await this.quizService.getNextQuestion(session)
+            if (!nextQuestion) {
+                // End quiz if no more questions
+                await this.quizSessionService.endSession(quizId)
+                this.quizStateManager.endSession(quizId)
+                this.server.to(quizId).emit(EVENTS.QUIZ_COMPLETED, {
+                    leaderboard: this.quizStateManager.getLeaderboard(quizId),
+                })
+                return
+            }
+
+            // Start next question
+            this.quizStateManager.startQuestion(
+                quizId,
+                nextQuestion.id,
+                QUIZ_CONSTANTS.QUESTION_TIME_LIMIT
+            )
+
+            // Emit next question to all participants
+            this.server.to(quizId).emit(EVENTS.NEXT_QUESTION, {
+                question: nextQuestion,
+                timeLimit: QUIZ_CONSTANTS.QUESTION_TIME_LIMIT,
+            })
+
+            // Set timer for question timeout
+            setTimeout(() => {
+                this.handleQuestionTimeout(quizId)
+            }, QUIZ_CONSTANTS.QUESTION_TIME_LIMIT)
+        } catch (error) {
+            console.error('Error handling next question:', error)
+        }
+    }
+
+    private async handleQuestionTimeout(quizId: string): Promise<void> {
+        try {
+            const session = await this.quizSessionService.findActiveSession(quizId)
+            if (!session) return
+
+            // Get participants who haven't answered
+            const allParticipants = this.quizStateManager.getAllParticipantIds(quizId)
+            const currentQuestion = await this.quizService.getCurrentQuestion(session)
+
+            // Record timeout for participants who haven't answered
+            allParticipants.forEach((userId) => {
+                if (!this.quizStateManager.hasSubmittedAnswer(quizId, userId)) {
+                    this.quizStateManager.submitAnswer(quizId, userId, '', 0)
+                }
+            })
+
+            // Emit timeout event with correct answer
+            this.server.to(quizId).emit(EVENTS.QUESTION_TIMEOUT, {
+                correctAnswer: currentQuestion.correctAnswer,
+                leaderboard: this.quizStateManager.getLeaderboard(quizId),
+            })
+
+            // Move to next question
+            await this.handleNextQuestion(quizId)
+        } catch (error) {
+            console.error('Error handling question timeout:', error)
         }
     }
 }

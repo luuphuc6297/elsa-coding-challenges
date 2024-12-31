@@ -4,6 +4,7 @@ export const EVENTS = {
     LEAVE_QUIZ: 'leaveQuiz',
     QUIZ_STARTED: 'quizStarted',
     QUIZ_ERROR: 'quizError',
+    QUIZ_COMPLETED: 'quizCompleted',
 
     // Session Status Events
     SESSION_EVENT: 'sessionEvent',
@@ -16,6 +17,8 @@ export const EVENTS = {
     END_QUESTION: 'endQuestion',
     QUESTION_STARTED: 'questionStarted',
     QUESTION_ENDED: 'questionEnded',
+    QUESTION_TIMEOUT: 'questionTimeout',
+    NEXT_QUESTION: 'nextQuestion',
 
     // Update Events
     SCORE_UPDATE: 'scoreUpdate',
@@ -48,3 +51,11 @@ export const CACHE_KEYS = {
  * Redis client injection token
  */
 export const REDIS_CLIENT = 'REDIS_CLIENT'
+
+export const QUIZ_CONSTANTS = {
+    QUESTION_TIME_LIMIT: 30000, // 30 seconds
+    BASE_POINTS: 1000,
+    MIN_POINTS_RATIO: 0.2, // Minimum 20% of points for last second answers
+    BONUS_THRESHOLD: 0.3, // 30% time remaining for bonus points
+    BONUS_MULTIPLIER: 1.5, // 50% bonus points for quick answers
+} as const
