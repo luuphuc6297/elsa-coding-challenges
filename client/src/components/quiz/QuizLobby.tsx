@@ -2,7 +2,8 @@
 
 import { useSocket } from '@/hooks/useSocket'
 import { useUser } from '@/hooks/useUser'
-import { participantReady, startSession } from '@/services/socket'
+import { participantReady } from '@/services/socket'
+import { EVENTS } from '@/shared/constants'
 import { Alert, Box, Button, Card, CardContent, CircularProgress, Typography } from '@mui/material'
 import { useEffect, useState } from 'react'
 
@@ -26,183 +27,83 @@ export function QuizLobby({ quizId, onError }: Props) {
     const [isLoading, setIsLoading] = useState(false)
     const isHost = user && participants.length > 0 && participants[0].userId === user._id
 
-    // useEffect(() => {
-    //     if (!socket) {
-    //         console.log('Socket not available in QuizLobby')
-    //         return
-    //     }
+    useEffect(() => {
+        if (!socket || !user) {
+            console.log('Dependencies not available:', { hasSocket: !!socket, hasUser: !!user })
+            return
+        }
 
-    //     if (!user) {
-    //         setError('User not authenticated')
-    //         return
-    //     }
+        console.log('Setting up QuizLobby socket listeners')
 
-    //     const handleSessionEvent = (event: { type: string; data: any }) => {
-    //         console.log('Received SESSION_EVENT in QuizLobby:', {
-    //             type: event.type,
-    //             data: event.data,
-    //             socketId: socket.socketId,
-    //             currentParticipants: participants,
-    //         })
+        const handleQuizEvent = (event: any) => {
+            console.log('Quiz event received:', event)
 
-    //         switch (event.type) {
-    //             case 'PARTICIPANT_JOINED':
-    //                 setParticipants(event.data.participants)
-    //                 break
-    //             case 'PARTICIPANT_LEFT':
-    //                 setParticipants(event.data.participants)
-    //                 break
-    //             case 'PARTICIPANT_READY':
-    //                 console.log('Participant ready event received:', {
-    //                     newParticipants: event.data.participants,
-    //                     currentParticipants: participants,
-    //                     readyCount: event.data.participants.filter((p: any) => p.isReady).length,
-    //                 })
-    //                 setParticipants(event.data.participants)
-    //                 setIsLoading(false)
-    //                 break
-    //             case 'SESSION_STARTED':
-    //                 console.log('Session started event received in lobby:', {
-    //                     event,
-    //                     type: event.type,
-    //                     data: event.data,
-    //                 })
-    //                 setSessionStatus('active')
-    //                 setIsLoading(false)
-    //                 break
-    //         }
-    //     }
+            switch (event.type) {
+                case 'PARTICIPANT_JOINED':
+                    setParticipants((prev) => [...prev, event.data])
+                    break
 
-    //     const handleError = (error: any) => {
-    //         console.error('Socket error in QuizLobby:', {
-    //             error,
-    //             socketId: socket.socketId,
-    //             connected: socket.isConnected,
-    //         })
-    //         setError(error.message)
-    //         setIsLoading(false)
-    //     }
+                case 'PARTICIPANT_LEFT':
+                    setParticipants((prev) => prev.filter((p) => p.userId !== event.data.userId))
+                    break
 
-    //     socket.on('SESSION_EVENT', handleSessionEvent)
-    //     socket.on('error', handleError)
+                case 'PARTICIPANT_READY':
+                    setParticipants((prev) =>
+                        prev.map((p) =>
+                            p.userId === event.data.userId ? { ...p, isReady: true } : p
+                        )
+                    )
+                    break
 
-    //     // Join lobby
-    //     console.log('Joining quiz lobby:', {
-    //         quizId,
-    //         userId: user._id,
-    //         username: user.username,
-    //         socketId: socket.socketId,
-    //     })
-    //     socket.emit('JOIN_QUIZ', {
-    //         quizId,
-    //         userId: user._id,
-    //         username: user.username,
-    //     })
+                case 'SESSION_STARTED':
+                    setSessionStatus('active')
+                    break
+            }
+        }
 
-    //     return () => {
-    //         console.log('Cleaning up QuizLobby socket listeners:', {
-    //             socketId: socket.socketId,
-    //             connected: socket.isConnected,
-    //         })
+        const handleError = (error: any) => {
+            console.error('Socket error:', error)
+            setError(error.message)
+            onError(error.message)
+        }
 
-    //         if (socket) {
-    //             socket.off('SESSION_EVENT', handleSessionEvent)
-    //             socket.off('error', handleError)
+        socket.on(EVENTS.SESSION_EVENT, handleQuizEvent)
+        socket.on('error', handleError)
 
-    //             if (socket.isConnected) {
-    //                 console.log('Leaving quiz lobby:', {
-    //                     quizId,
-    //                     userId: user._id,
-    //                     socketId: socket.socketId,
-    //                 })
-    //                 socket.emit('LEAVE_QUIZ', {
-    //                     quizId,
-    //                     userId: user._id,
-    //                 })
-    //             }
-    //         }
-    //     }
-    // }, [socket, quizId, user])
+        // Join quiz session
+        socket.emit(EVENTS.JOIN_QUIZ, {
+            quizId,
+            userId: user._id,
+            username: user.username,
+        })
+
+        return () => {
+            console.log('Cleaning up QuizLobby socket listeners')
+            if (socket) {
+                socket.off(EVENTS.SESSION_EVENT, handleQuizEvent)
+                socket.off('error', handleError)
+            }
+        }
+    }, [socket, user, quizId, onError])
 
     const handleReady = async () => {
         if (!user || !socket) {
-            console.log('Cannot emit ready event: missing dependencies', {
+            console.log('Cannot mark as ready: missing dependencies', {
                 hasUser: !!user,
                 hasSocket: !!socket,
-                socketId: socket?.socketId,
-                connected: socket?.isConnected,
             })
             return
         }
 
         setIsLoading(true)
-        console.log('Marking participant as ready:', {
-            quizId,
-            userId: user._id,
-            socketId: socket.socketId,
-            connected: socket.isConnected,
-        })
-
         try {
             await participantReady(quizId, user._id)
+            console.log('Participant marked as ready')
         } catch (error) {
-            console.error('Error marking participant as ready:', error)
+            console.error('Error marking as ready:', error)
             setError('Failed to mark as ready')
-            setIsLoading(false)
-        }
-    }
-
-    const handleStartSession = async () => {
-        if (!user || !socket) {
-            console.log('Cannot start session: missing dependencies', {
-                hasUser: !!user,
-                hasSocket: !!socket,
-                socketId: socket?.socketId,
-                connected: socket?.isConnected,
-                isHost,
-                sessionStatus,
-                user,
-            })
-            return
-        }
-
-        const allParticipantsReady = participants.every((p) => p.isReady)
-        if (!allParticipantsReady) {
-            console.log('Cannot start session: not all participants ready', {
-                readyCount: participants.filter((p) => p.isReady).length,
-                totalParticipants: participants.length,
-                participants: participants.map((p) => ({
-                    userId: p.userId,
-                    isReady: p.isReady,
-                    username: p.username,
-                })),
-            })
-            return
-        }
-
-        setIsLoading(true)
-        console.log('Starting quiz session:', {
-            quizId,
-            userId: user._id,
-            socketId: socket.socketId,
-            connected: socket.isConnected,
-            readyParticipants: participants.filter((p) => p.isReady).length,
-            totalParticipants: participants.length,
-            isHost,
-            sessionStatus,
-            user,
-            participants: participants.map((p) => ({
-                userId: p.userId,
-                isReady: p.isReady,
-                username: p.username,
-            })),
-        })
-
-        try {
-            await startSession(quizId, user._id)
-        } catch (error) {
-            console.error('Error starting session:', error)
-            setError('Failed to start session')
+            onError('Failed to mark as ready')
+        } finally {
             setIsLoading(false)
         }
     }
@@ -221,7 +122,7 @@ export function QuizLobby({ quizId, onError }: Props) {
         <Card>
             <CardContent>
                 <Typography variant="h5" gutterBottom>
-                    Waiting Room {isHost ? '(Host)' : '(Participant)'}
+                    Quiz Lobby {isHost ? '(Host)' : '(Participant)'}
                 </Typography>
 
                 <Box sx={{ my: 3 }}>
@@ -257,41 +158,22 @@ export function QuizLobby({ quizId, onError }: Props) {
                 </Box>
 
                 <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2 }}>
-                    {isHost ? (
-                        <Button
-                            variant="contained"
-                            color="primary"
-                            onClick={handleStartSession}
-                            disabled={!participants.every((p) => p.isReady) || isLoading}
-                            startIcon={isLoading && <CircularProgress size={20} color="inherit" />}
-                        >
-                            {isLoading
-                                ? 'Starting...'
-                                : `Start Quiz (${participants.filter((p) => p.isReady).length}/${
-                                      participants.length
-                                  } ready)`}
-                        </Button>
-                    ) : (
-                        <Button
-                            variant="contained"
-                            color="primary"
-                            onClick={handleReady}
-                            disabled={
-                                !user ||
-                                participants.find((p) => p.userId === user._id)?.isReady ||
-                                isLoading
-                            }
-                            startIcon={isLoading && <CircularProgress size={20} color="inherit" />}
-                        >
-                            {isLoading ? 'Marking as Ready...' : 'Ready'}
-                        </Button>
-                    )}
+                    <Button
+                        variant="contained"
+                        color="primary"
+                        onClick={handleReady}
+                        disabled={
+                            !user ||
+                            participants.find((p) => p.userId === user._id)?.isReady ||
+                            isLoading
+                        }
+                        startIcon={isLoading && <CircularProgress size={20} color="inherit" />}
+                    >
+                        {isLoading ? 'Marking as Ready...' : 'Ready'}
+                    </Button>
                 </Box>
 
                 <Box sx={{ mt: 2 }}>
-                    <Typography variant="body2" color="text.secondary">
-                        Debug Info:
-                    </Typography>
                     <Typography variant="body2" color="text.secondary">
                         Session Status: {sessionStatus}
                     </Typography>

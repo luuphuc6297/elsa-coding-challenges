@@ -1,32 +1,36 @@
-// Socket Events
 export const EVENTS = {
-    // Quiz Flow Events
-    JOIN_QUIZ: 'joinQuiz',
-    LEAVE_QUIZ: 'leaveQuiz',
-    QUIZ_STARTED: 'quizStarted',
-    QUIZ_ERROR: 'quizError',
+    JOIN_QUIZ: 'JOIN_QUIZ',
+    LEAVE_QUIZ: 'LEAVE_QUIZ',
+    QUIZ_STARTED: 'QUIZ_STARTED',
+    QUIZ_ERROR: 'QUIZ_ERROR',
+    QUIZ_COMPLETED: 'QUIZ_COMPLETED',
 
     // Session Status Events
-    SESSION_EVENT: 'sessionEvent',
-    START_SESSION: 'startSession',
-    SESSION_STARTED: 'sessionStarted',
-    SESSION_COMPLETED: 'sessionCompleted',
+    SESSION_EVENT: 'SESSION_EVENT',
+    START_SESSION: 'START_SESSION',
+    SESSION_STARTED: 'SESSION_STARTED',
+    SESSION_COMPLETED: 'SESSION_COMPLETED',
 
     // Game Progress Events
-    START_QUESTION: 'startQuestion',
-    END_QUESTION: 'endQuestion',
-    QUESTION_STARTED: 'questionStarted',
-    QUESTION_ENDED: 'questionEnded',
+    START_QUESTION: 'START_QUESTION',
+    END_QUESTION: 'END_QUESTION',
+    QUESTION_STARTED: 'QUESTION_STARTED',
+    QUESTION_ENDED: 'QUESTION_ENDED',
+    QUESTION_TIMEOUT: 'QUESTION_TIMEOUT',
+    NEXT_QUESTION: 'NEXT_QUESTION',
 
     // Update Events
-    SCORE_UPDATE: 'scoreUpdate',
-    LEADERBOARD_UPDATE: 'leaderboardUpdate',
-    SUBMIT_ANSWER: 'submitAnswer',
+    SCORE_UPDATE: 'SCORE_UPDATE',
+    LEADERBOARD_UPDATE: 'LEADERBOARD_UPDATE',
+    SUBMIT_ANSWER: 'SUBMIT_ANSWER',
 
     // Participant Events
-    PARTICIPANT_JOINED: 'participantJoined',
-    PARTICIPANT_LEFT: 'participantLeft',
-    PARTICIPANT_READY: 'participantReady',
+    PARTICIPANT_JOINED: 'PARTICIPANT_JOINED',
+    PARTICIPANT_LEFT: 'PARTICIPANT_LEFT',
+    PARTICIPANT_READY: 'PARTICIPANT_READY',
+
+    RECONNECT_SESSION: 'RECONNECT_SESSION',
+    ANSWER_RESULT: 'ANSWER_RESULT',
 }
 
 export const QUIZ_STATUS = {
