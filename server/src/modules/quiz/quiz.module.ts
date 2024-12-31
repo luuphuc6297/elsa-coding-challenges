@@ -10,6 +10,8 @@ import { QuizController } from './controllers/quiz.controller'
 import { QuizSession, QuizSessionSchema } from './entities/quiz-session.entity'
 import { Quiz, QuizSchema } from './entities/quiz.entity'
 import { QuizGateway } from './quiz.gateway'
+import { QuestionService } from './services/question.service'
+import { QuizSessionService } from './services/quiz-session.service'
 import { QuizService } from './services/quiz.service'
 
 class RedisIoAdapter extends IoAdapter {
@@ -63,6 +65,8 @@ class RedisIoAdapter extends IoAdapter {
     controllers: [QuizController],
     providers: [
         QuizService,
+        QuestionService,
+        QuizSessionService,
         QuizGateway,
         {
             provide: 'WS_ADAPTER',
@@ -80,6 +84,6 @@ class RedisIoAdapter extends IoAdapter {
             inject: [RedisService],
         },
     ],
-    exports: [QuizService],
+    exports: [QuizService, QuestionService, QuizSessionService],
 })
 export class QuizModule {}

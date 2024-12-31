@@ -21,11 +21,29 @@ import { JoinQuizDto } from './dtos/join-quiz.dto'
 import { ParticipantReadyDto } from './dtos/participant-ready.dto'
 import { SubmitAnswerDto } from './dtos/submit-answer.dto'
 import {
+    CompetitiveQuizSessionFactory,
+    DefaultQuizSessionFactory,
+    IQuizSessionFactory,
+    PracticeQuizSessionFactory,
+} from './factories/quiz-session.factory'
+import {
     IQuestionEndedEventData,
     ISessionCompletedEventData,
 } from './interfaces/quiz-session.interface'
-
+import {
+    LeaderboardObserver,
+    QuizEventSubject,
+    RedisObserver,
+} from './observers/quiz-event.observer'
+import { QuestionService } from './services/question.service'
+import { QuizSessionService } from './services/quiz-session.service'
 import { QuizService } from './services/quiz.service'
+import {
+    BasicScoringStrategy,
+    IScoringStrategy,
+    ProgressiveScoringStrategy,
+    TimeBasedScoringStrategy,
+} from './strategies/scoring.strategy'
 
 const QUIZ_CHANNEL = 'quiz_events'
 
@@ -88,13 +106,36 @@ export class QuizGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
         }
     > = new Map()
 
+    private quizEventSubject: QuizEventSubject
+    private scoringStrategies: Map<string, IScoringStrategy>
+    private sessionFactories: Map<string, IQuizSessionFactory>
+
     constructor(
         private readonly quizService: QuizService,
+        private readonly questionService: QuestionService,
+        private readonly quizSessionService: QuizSessionService,
         private readonly leaderboardService: LeaderboardService,
         private readonly redisService: RedisService,
         private readonly metricsService: MetricsService,
         private readonly jwtService: JwtService
-    ) {}
+    ) {
+        // Initialize observers
+        this.quizEventSubject = new QuizEventSubject()
+        this.quizEventSubject.addObserver(new LeaderboardObserver(leaderboardService))
+        this.quizEventSubject.addObserver(new RedisObserver(redisService))
+
+        // Initialize scoring strategies
+        this.scoringStrategies = new Map()
+        this.scoringStrategies.set('default', new TimeBasedScoringStrategy())
+        this.scoringStrategies.set('progressive', new ProgressiveScoringStrategy())
+        this.scoringStrategies.set('basic', new BasicScoringStrategy())
+
+        // Initialize session factories
+        this.sessionFactories = new Map()
+        this.sessionFactories.set('default', new DefaultQuizSessionFactory())
+        this.sessionFactories.set('competitive', new CompetitiveQuizSessionFactory())
+        this.sessionFactories.set('practice', new PracticeQuizSessionFactory())
+    }
 
     async afterInit() {
         try {
@@ -207,7 +248,7 @@ export class QuizGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     async handleJoinQuiz(client: Socket, data: JoinQuizDto) {
         const startTime = Date.now()
         try {
-            const session = await this.quizService.joinQuizSession(data.quizId, data.userId)
+            const session = await this.quizSessionService.joinQuizSession(data.quizId, data.userId)
             client.join(data.quizId)
 
             const leaderboard = await this.leaderboardService.getLeaderboard(data.quizId)
@@ -226,10 +267,9 @@ export class QuizGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
             }
             quizState.participants.add(data.userId)
 
-            await this.redisService.publish(QUIZ_CHANNEL, {
-                event: EVENTS.JOIN_QUIZ,
-                quizId: data.quizId,
-                data: { userId: data.userId },
+            // Notify observers
+            await this.quizEventSubject.notify(EVENTS.JOIN_QUIZ, data.quizId, {
+                userId: data.userId,
             })
 
             // Track metrics
@@ -264,38 +304,41 @@ export class QuizGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
                 throw new Error('Answer already submitted for this question')
             }
 
-            const result = await this.quizService.submitAnswer(
+            // Get quiz for scoring strategy selection
+            const quiz = await this.quizService.findById(data.quizId)
+
+            const scoringStrategy = this.scoringStrategies.get(
+                quiz.settings?.scoringType || 'default'
+            )
+
+            // Validate answer and calculate points
+            const { isCorrect, points } = await this.questionService.validateAnswer(
+                data.questionId,
+                data.answer,
+                data.timeSpent,
+                quiz.questions[quizState.currentQuestionIndex].timeLimit,
+                quiz.questions[quizState.currentQuestionIndex].points
+            )
+
+            // Submit answer using calculated points
+            const result = await this.quizSessionService.submitAnswer(
                 data.quizId,
                 data.questionId,
                 data.answer,
                 data.userId,
-                data.timeSpent
+                data.timeSpent,
+                isCorrect,
+                points
             )
 
             quizState.submittedAnswers.add(answerKey)
 
-            await this.redisService.publish(QUIZ_CHANNEL, {
-                event: EVENTS.SCORE_UPDATE,
-                quizId: data.quizId,
-                data: {
-                    userId: data.userId,
-                    score: 0,
-                    isCorrect: false,
-                },
-            })
-
-            const leaderboard = await this.leaderboardService.updateLeaderboard({
-                quizId: data.quizId,
+            // Notify observers
+            await this.quizEventSubject.notify(EVENTS.SCORE_UPDATE, data.quizId, {
                 userId: data.userId,
-                score: 0,
+                score: result.totalScore,
+                isCorrect,
                 timeSpent: data.timeSpent,
-                correctAnswers: 0,
-            })
-
-            await this.redisService.publish(QUIZ_CHANNEL, {
-                event: EVENTS.LEADERBOARD_UPDATE,
-                quizId: data.quizId,
-                data: { leaderboard },
             })
 
             const allAnswered = Array.from(quizState.participants).every((participantId) =>
@@ -500,44 +543,21 @@ export class QuizGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
     async handleParticipantReady(client: Socket, payload: ParticipantReadyDto) {
         const startTime = Date.now()
         try {
-            console.log('Handling PARTICIPANT_READY event:', {
-                clientId: client.id,
-                payload,
-                user: client['user'],
-                transport: client.conn.transport.name,
-            })
-
             if (!client['user']) {
                 throw new Error('User not authenticated')
             }
 
-            const session = await this.quizService.setParticipantReady(
+            const quiz = await this.quizService.findById(payload.quizId)
+            const sessionFactory = this.sessionFactories.get(quiz.settings?.mode || 'default')
+
+            const session = await this.quizSessionService.setParticipantReady(
                 payload.quizId,
                 payload.userId
             )
 
-            console.log('Participant marked as ready:', {
-                clientId: client.id,
-                quizId: payload.quizId,
-                userId: payload.userId,
-                participantsCount: session.participants.length,
-            })
-
-            // Broadcast directly to the room first
-            const eventData = {
-                type: EVENTS.PARTICIPANT_READY,
-                data: {
-                    participants: session.participants,
-                },
-            }
-            console.log('Broadcasting directly to room:', payload.quizId, eventData)
-            this.server.to(payload.quizId).emit(EVENTS.SESSION_EVENT, eventData)
-
-            // Then publish to Redis for other servers
-            await this.redisService.publish(QUIZ_CHANNEL, {
-                event: EVENTS.SESSION_EVENT,
-                quizId: payload.quizId,
-                data: eventData,
+            // Notify observers
+            await this.quizEventSubject.notify(EVENTS.PARTICIPANT_READY, payload.quizId, {
+                participants: session.participants,
             })
 
             // Track metrics
@@ -545,11 +565,6 @@ export class QuizGateway implements OnGatewayInit, OnGatewayConnection, OnGatewa
 
             return ResponseUtil.success({ session })
         } catch (error) {
-            console.error('Error handling PARTICIPANT_READY:', {
-                error,
-                clientId: client.id,
-                payload,
-            })
             await this.metricsService.trackError('participant_ready', error.message)
             return ResponseUtil.error(error.message)
         }

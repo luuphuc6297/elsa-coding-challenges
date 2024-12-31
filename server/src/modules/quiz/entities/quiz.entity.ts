@@ -22,6 +22,33 @@ export class Question {
     timeLimit: number
 }
 
+@Schema()
+export class QuizSettings {
+    @Prop({ type: String, enum: ['default', 'progressive', 'basic'], default: 'default' })
+    scoringType: string
+
+    @Prop({ type: String, enum: ['default', 'competitive', 'practice'], default: 'default' })
+    mode: string
+
+    @Prop({ type: Boolean, default: true })
+    shuffleQuestions: boolean
+
+    @Prop({ type: Boolean, default: true })
+    shuffleOptions: boolean
+
+    @Prop({ type: Boolean, default: true })
+    showResults: boolean
+
+    @Prop({ type: Number, default: 0 })
+    minParticipants: number
+
+    @Prop({ type: Number, default: 0 })
+    maxParticipants: number
+
+    @Prop({ type: Boolean, default: false })
+    requiresAuthentication: boolean
+}
+
 @Schema({ timestamps: true })
 export class Quiz extends Document {
     @Prop({ required: true, unique: true })
@@ -45,8 +72,8 @@ export class Quiz extends Document {
     @Prop({ default: 0 })
     duration: number // Total duration in minutes
 
-    @Prop({ default: 0 })
-    maxParticipants: number
+    @Prop({ type: QuizSettings, default: () => ({}) })
+    settings: QuizSettings
 
     @Prop({ type: String, enum: ['public', 'private'], default: 'public' })
     visibility: string
