@@ -26,6 +26,8 @@ export const EVENTS = {
     PARTICIPANT_JOINED: 'participantJoined',
     PARTICIPANT_LEFT: 'participantLeft',
     PARTICIPANT_READY: 'participantReady',
+
+    ANSWER_RESULT: 'answer_result',
 }
 
 export const QUIZ_STATUS = {

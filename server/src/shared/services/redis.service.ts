@@ -2,6 +2,7 @@ import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import Redis from 'ioredis'
 import { ResilienceService } from './resilience.service'
+import { MetricsService } from './metrics.service'
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
@@ -11,7 +12,8 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
     constructor(
         private configService: ConfigService,
-        private resilienceService: ResilienceService
+        private resilienceService: ResilienceService,
+        private metricsService: MetricsService
     ) {}
 
     async onModuleInit() {
@@ -214,5 +216,28 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     async reconnect(): Promise<void> {
         this.isInitialized = false
         await this.initializeClients()
+    }
+
+    async hGetAll(key: string): Promise<Record<string, string>> {
+        const startTime = Date.now()
+        try {
+            const result = await this.pubClient.hgetall(key)
+            await this.metricsService.trackLatency('redis_hgetall', Date.now() - startTime)
+            return result || {}
+        } catch (error) {
+            await this.metricsService.trackError('redis_hgetall', error.message)
+            throw error
+        }
+    }
+
+    async hSet(key: string, field: string, value: string): Promise<void> {
+        const startTime = Date.now()
+        try {
+            await this.pubClient.hset(key, field, value)
+            await this.metricsService.trackLatency('redis_hset', Date.now() - startTime)
+        } catch (error) {
+            await this.metricsService.trackError('redis_hset', error.message)
+            throw error
+        }
     }
 }

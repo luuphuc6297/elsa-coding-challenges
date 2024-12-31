@@ -13,6 +13,8 @@ import { QuizGateway } from './quiz.gateway'
 import { QuestionService } from './services/question.service'
 import { QuizSessionService } from './services/quiz-session.service'
 import { QuizService } from './services/quiz.service'
+import { QuizStateManager } from './services/quiz-state.manager'
+import { QuizEventHandlerService } from './services/quiz-event-handler.service'
 
 class RedisIoAdapter extends IoAdapter {
     private adapterConstructor: ReturnType<typeof createAdapter>
@@ -67,6 +69,8 @@ class RedisIoAdapter extends IoAdapter {
         QuizService,
         QuestionService,
         QuizSessionService,
+        QuizStateManager,
+        QuizEventHandlerService,
         QuizGateway,
         {
             provide: 'WS_ADAPTER',
@@ -84,6 +88,12 @@ class RedisIoAdapter extends IoAdapter {
             inject: [RedisService],
         },
     ],
-    exports: [QuizService, QuestionService, QuizSessionService],
+    exports: [
+        QuizService,
+        QuestionService,
+        QuizSessionService,
+        QuizStateManager,
+        QuizEventHandlerService,
+    ],
 })
 export class QuizModule {}

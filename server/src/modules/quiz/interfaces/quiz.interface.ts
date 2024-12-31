@@ -1,5 +1,24 @@
 import { Quiz } from '../entities/quiz.entity'
 import { QuizSession } from '../entities/quiz-session.entity'
+import {
+    IQuizSession,
+    ISessionCompletedEventData,
+    IQuestionStartedEventData,
+} from './quiz-session.interface'
+
+export { IQuizSession, ISessionCompletedEventData, IQuestionStartedEventData }
+
+export interface IQuizStartResult {
+    session: IQuizSession
+    question: IQuestionStartedEventData
+    leaderboard: Array<{
+        userId: string
+        username: string
+        score: number
+        correctAnswers: number
+        timeSpent: number
+    }>
+}
 
 export interface IQuizService {
     createQuiz(createQuizDto: any): Promise<Quiz>
