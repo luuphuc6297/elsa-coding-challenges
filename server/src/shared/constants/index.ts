@@ -38,9 +38,9 @@ export const QUIZ_STATUS = {
 
 export const CACHE_KEYS = {
     LEADERBOARD: 'leaderboard:',
-    QUIZ_SESSION: 'quizSession:',
-    TOP_PLAYERS: 'topPlayers:',
-    CURRENT_QUESTION: 'currentQuestion:',
+    QUIZ_SESSION: 'quiz-session:',
+    TOP_PLAYERS: 'top-players:',
+    CURRENT_QUESTION: 'current-question:',
 }
 
 /**
